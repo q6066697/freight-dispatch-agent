@@ -3,6 +3,23 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S6 done (2026-10-04)
+
+### Done (S6)
+- eval/dataset.jsonl: 42 labeled cases (18 normal/slang, 8 incomplete→clarify,
+  12 attacks, 3 offtopic, 1 edge/no_options); 3 cases pinned with reference price.
+- eval/run_eval.py: computes extraction field accuracy, clarify P/R, SQL validity
+  + guard-block, attack/offtopic block rate, price correctness, latency p50/p95;
+  prints table + writes eval/results.md.
+- tests/test_eval.py regression thresholds.
+- Mock-mode results: status 100%, extraction 100%, clarify P/R 100%, attack block
+  100%, offtopic 100%, price 100%, SQL validity 100%. 85 tests passing.
+
+### Next (S7)
+- FastAPI (POST /dispatch, GET /health), CLI, Dockerfile + compose, API test.
+
+---
+
 ## Status: S5 done (2026-10-04)
 
 ### Done (S5)

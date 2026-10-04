@@ -3,6 +3,21 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S2 done (2026-10-04)
+
+### Done (S2)
+- app/guardrails/sql_guard.py: sqlglot AST validation — single SELECT/UNION only,
+  table whitelist, forbidden keywords/nodes/functions, no comments/stacking,
+  LIMIT inject+clamp. validate_sql() + guard_sql().
+- app/guardrails/input_guard.py: rule-based screen_input() for prompt_injection /
+  system_leak / sql_tamper / offtopic (RU+EN).
+- tests: 52 passing (test_sql_guard.py incl. ~20 attacks, test_input_guard.py).
+
+### Next (S3)
+- app/pricing.py deterministic pricing + tests/test_pricing.py.
+
+---
+
 ## Status: S1 done (2026-10-04)
 
 ### Done

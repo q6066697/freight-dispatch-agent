@@ -50,7 +50,7 @@ flowchart TD
 | `clarify` | If a critical field (origin / destination / weight / body type) is missing, ask one targeted question and stop. | no |
 | `sql_agent` | Generate a `SELECT`, pass it through the SQL guard, run it read-only. Up to 2 self-corrections on rejection. | yes (SQL only) |
 | `pricing` | Compute each option's price from the rate sheet. | **no — pure Python** |
-| `responder` | Compose the final Russian reply with up to 3 options. | yes |
+| `responder` | Compose the final Russian reply, **grounded** in state: no options → deterministic template (no LLM); otherwise the LLM reply is checked by the output guard. | yes (guarded) |
 
 ### Why pricing is deterministic
 
@@ -90,44 +90,75 @@ cannot write or run DDL.
 for prompt injection, data-tamper phrasing, and system-prompt-leak attempts, combined
 with the provider's LLM classifier. Any hit → a polite refusal, before extraction.
 
+**Output guard** (`app/guardrails/output_guard.py`) — the reply must only name
+carriers and prices that are present in `state.options`. The guard parses the composed
+text and flags any carrier mention or money amount that isn't backed by the data; on a
+violation the responder falls back to a deterministic grounded template and records an
+`output_guard_blocked` trace event. This is what stops a real model from inventing
+carriers (see [docs/case-hallucination.md](docs/case-hallucination.md)).
+
 ---
 
 ## Eval
 
-The eval harness (`eval/run_eval.py`) runs **42 labeled cases**
+The eval harness (`eval/run_eval.py`) runs **46 labeled cases**
 (`eval/dataset.jsonl`) — normal orders, dispatcher slang (*еврофура, тентовка,
 догруз*), incomplete requests that must trigger a clarification, 12 attacks, off-topic
-messages, and an edge case — through the full graph and reports:
+messages, and no-options edge cases (missing routes, over-capacity) — through the full
+graph and reports:
 
 | Metric | Value (mock) |
 |---|---|
 | Status accuracy | 100.0% |
 | Extraction accuracy (overall) | 100.0% |
-| Clarify precision | 100.0% |
-| Clarify recall | 100.0% |
+| Clarify precision / recall | 100.0% / 100.0% |
 | SQL validity rate | 100.0% |
 | SQL guard-block rate | 0.0% |
 | **Attack block rate (n=12)** | **100.0%** |
 | Off-topic block rate | 100.0% |
+| **Hallucination rate (n=23)** | **0.0%** |
 | Price correctness vs. reference (n=3) | 100.0% |
-| Latency p50 / p95 | 9.1 ms / 43.9 ms |
+| Latency p50 / p95 | ~16 ms / ~52 ms |
 
-Per-field extraction accuracy (origin, destination, weight, body type, payment,
-urgency, load type) is 100% on this dataset. The full table is written to
-`eval/results.md` on every run.
-
-> **Reading the numbers.** In `mock` mode the extractor is a deterministic rule-based
-> NLU and the SQL builder always emits a valid query, so extraction and SQL-validity
-> are 100% and the SQL-guard *block* rate is 0% — attacks are stopped earlier, at
-> `input_guard`. The guard's blocking behavior is exercised directly by ~20 attack
-> vectors in `tests/test_sql_guard.py`. On a real model these rates become a genuine
-> measure of model quality; the harness is identical.
+Per-field extraction accuracy is 100% on this dataset. The full table is written to
+`eval/results_<provider>.md` on every run (so a mock run never overwrites a real one).
 
 Run it:
 
 ```bash
-python -m eval.run_eval
+python -m eval.run_eval                                   # mock, all 46 cases
+python -m eval.run_eval --ids-file eval/subset_cpu.txt    # 12-case subset
+python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt  # real model
 ```
+
+## Mock vs. real model
+
+The two modes measure different things, and it matters:
+
+- **`mock`** is a deterministic rule-based stand-in. Its green eval scores verify the
+  **plumbing of the graph** — routing, guardrails, pricing, grounding, the eval
+  harness itself — not the quality of any language model. Extraction and SQL-validity
+  are 100% because the mock is rules, and the SQL-guard *block* rate is 0% because
+  attacks are stopped earlier at `input_guard` (the guard's blocking is exercised
+  directly by ~20 vectors in `tests/test_sql_guard.py`).
+- **A real model** (`ollama`, `openai`, `anthropic`) runs through the *identical*
+  harness, so the same numbers become a genuine measure of model quality —
+  extraction accuracy, SQL validity, and especially **hallucination rate**.
+
+This distinction is not academic. A real 7B model (ollama/qwen2.5) once invented two
+non-existent carriers and prices on a no-options request — the mock had hidden it.
+That bug and its fix (deterministic no-options reply, an output guard that checks
+every carrier/price against `state.options`, city normalization, and a deterministic
+SQL fallback) are written up in **[docs/case-hallucination.md](docs/case-hallucination.md)**.
+
+Real-model metrics (fill in after a run):
+
+| Metric | mock | ollama / qwen2.5:7b |
+|---|---|---|
+| Extraction accuracy | 100% | _TBD_ |
+| SQL validity | 100% | _TBD_ |
+| Hallucination rate | 0% | _TBD_ |
+| Attack block rate | 100% | _TBD_ |
 
 ---
 
@@ -193,18 +224,22 @@ docker compose up --build
 ```
 app/
   config.py          env-driven settings
-  graph.py           supervisor StateGraph + dispatch()
+  graph.py           supervisor StateGraph + dispatch() / run_graph()
   state.py           LangGraph state
   schemas.py         Pydantic models (request, options, API)
   pricing.py         deterministic pricing
+  normalize.py       canonical cities / enums after extraction
+  retrieval.py       trusted parameterized fallback query
+  reply_templates.py deterministic grounded / no-options replies
   db.py              read-only SQLite connection + table whitelist
-  api.py  cli.py     FastAPI + command line
+  api.py  cli.py     FastAPI + command line (cli has --verbose)
   nodes/             input_guard, extractor, clarify, sql_agent, pricing_node, responder
   llm/               provider abstraction: mock (default), openai, anthropic, ollama
-  guardrails/        sql_guard.py, input_guard.py
+  guardrails/        sql_guard.py, input_guard.py, output_guard.py
 db/                  schema.sql + seed.py (synthetic data)
-eval/                dataset.jsonl, run_eval.py, results.md
-tests/               pytest suite (guardrails, pricing, graph, API, eval)
+eval/                dataset.jsonl, run_eval.py, results_<provider>.md, subset_cpu.txt
+docs/                case-hallucination.md
+tests/               pytest suite (guardrails, pricing, graph, API, eval, normalize)
 ```
 
 ---

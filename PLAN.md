@@ -20,3 +20,8 @@ All stages complete. After each: `pytest` + `ruff check .`, update `PROGRESS.md`
   `test_api.py`.
 - [x] **S8. README.** EN + RU, Mermaid diagram, metrics, quick start, author.
 - [x] **S9. Final.** Clean rebuild, 90 tests green, eval all-green, summary.
+- [x] **S10. Real-model hardening.** Grounding (output guard + deterministic
+  no-options reply), city normalization + deterministic SQL fallback, Ollama env
+  tuning, CLI --verbose, eval hallucination metric + flags + no-route cases +
+  subset_cpu, realistic seed data, docs/case-hallucination.md + README mock-vs-real.
+  115 tests green; one real-model control run recorded in PROGRESS.md.

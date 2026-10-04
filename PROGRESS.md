@@ -3,6 +3,43 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S10 "Real-model hardening" done (2026-10-05)
+
+### The bug (found on real model)
+ollama/qwen2.5:7b on "нужно отвезти 12 тонн труб из минска в москву ..." returned
+status=no_options BUT the responder showed two invented carriers (ООО "Автотрейдинг"
+50 000, ФКУ "Транспорт" 48 000). Mock hid it. Root cause: SQL agent found 0 rows
+(small model echoed inflected cities минска/москву), and the responder let the LLM
+write the reply even with empty options → fabrication.
+
+### Fixes (all provider-independent)
+- **Grounding (D14):** no_options → deterministic template, no LLM. With options →
+  LLM reply checked by `guardrails/output_guard.py` (every carrier+price must be in
+  state.options); violation → deterministic fallback + `output_guard_blocked` trace.
+- **Normalization + fallback (D15):** `app/normalize.py` canonicalizes cities/enums
+  after extractor; `app/retrieval.py` parameterized fallback query runs when LLM SQL
+  fails or returns 0 rows for a complete request; trace records
+  sql_path=llm_sql|fallback_sql|none.
+- **Ollama (D16):** OLLAMA_TIMEOUT=600, OLLAMA_KEEP_ALIVE=30m, OLLAMA_NUM_CTX=8192.
+- **CLI --verbose:** prints extraction, SQL attempts + guard verdicts, sql_path,
+  row/option counts, steps.
+- **Eval:** hallucination_rate metric; flags --provider/--limit/--ids/--ids-file;
+  writes results_<provider>.md; +4 no_route cases (46 total); eval/subset_cpu.txt.
+- **Seed realism (D17):** country-correct legal forms + phones (BY +375 25/29/33/44,
+  RU +7, LT UAB +370, PL Sp. z o.o. +48). Recomputed 3 pinned eval prices.
+- **Docs:** docs/case-hallucination.md; README "Mock vs real model".
+
+### Verification
+- pytest **115 passed**, ruff clean (tests forced to mock regardless of local .env).
+- eval (mock, 46 cases): status 100%, extraction 100%, clarify P/R 100%, attack
+  block 100%, offtopic 100%, **hallucination 0%**, price 100%, SQL path llm/fallback
+  = 18/5. results_mock.md regenerated.
+
+### Real-model control run (ollama qwen2.5:7b, CPU)
+_Pending — see "Control run output" appended below once the background run finishes._
+
+---
+
 ## Status: COMPLETE (S9 done, 2026-10-04)
 
 ### Final verification (clean rebuild)

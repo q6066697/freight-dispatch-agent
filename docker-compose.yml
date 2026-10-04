@@ -1,0 +1,14 @@
+services:
+  dispatch:
+    build: .
+    image: freight-dispatch-agent:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # Default is the offline deterministic mock. To use a real model, set
+      # LLM_PROVIDER and the matching key here or via an .env file.
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_MODEL: ${LLM_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped

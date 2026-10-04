@@ -3,6 +3,21 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S7 done (2026-10-04)
+
+### Done (S7)
+- app/api.py: FastAPI POST /dispatch, GET /health; lifespan seeds DB if missing.
+- app/cli.py: python -m app.cli "<text>" [--provider] [--json].
+- Dockerfile (python:3.11-slim, non-root uid 10001, seeds DB at build, healthcheck),
+  docker-compose.yml, .dockerignore.
+- tests/test_api.py (5) via TestClient. Full suite: 90 passing, ruff clean.
+- Docker verified available (29.1.2); image build verified in S8 after README.
+
+### Next (S8)
+- README (EN + short RU), Mermaid diagram, metrics table, quick start, author.
+
+---
+
 ## Status: S6 done (2026-10-04)
 
 ### Done (S6)

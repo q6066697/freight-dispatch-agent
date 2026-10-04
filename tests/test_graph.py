@@ -87,3 +87,53 @@ def test_urgent_surcharge_reflected_in_breakdown():
     bd = r.options[0].price_breakdown
     assert bd["urgent"] is True
     assert bd["urgency_pct"] > 0
+
+
+def test_responder_grounds_hallucinated_reply():
+    """A provider that invents carriers must be overridden by the output guard."""
+    class HallucinatingProvider(MockProvider):
+        def compose_reply(self, request, options):
+            return (
+                'Предлагаю: ООО "Автотрейдинг" — тент, цена 50 000 руб, срок 3 дня; '
+                'ФКУ "Транспорт" — тент, цена 48 000 руб.'
+            )
+
+    graph = build_graph(HallucinatingProvider())
+    final = graph.invoke({"text": "12 тонн из Минска в Москву, тент, безнал"})
+    resp = to_response(final)
+    steps = [s.step for s in resp.trace]
+    assert "output_guard_blocked" in steps
+    assert "Автотрейдинг" not in resp.reply
+    assert "50 000" not in resp.reply and "50000" not in resp.reply
+    # grounded fallback names a real carrier from options
+    assert any(o.carrier in resp.reply for o in resp.options)
+
+
+def test_sql_fallback_when_model_sql_always_invalid():
+    class BadSQLProvider(MockProvider):
+        def generate_sql(self, request, error=None):
+            return "SELECT * FROM secret_table"  # always rejected by guard
+
+    graph = build_graph(BadSQLProvider())
+    final = graph.invoke({"text": "12 тонн из Минска в Москву, тент, безнал"})
+    assert final["sql_path"] == "fallback_sql"
+    assert final["rows"], "fallback must still retrieve candidates"
+    assert to_response(final).status == "ok"
+
+
+def test_normalization_recovers_inflected_cities():
+    class InflectingProvider(MockProvider):
+        def extract_request(self, text):
+            return {
+                "origin": "минска", "destination": "москву", "body_type": "тент",
+                "weight_t": 12.0, "payment": "noncash", "volume_m3": None,
+                "cargo_type": None, "date": None, "urgent": False, "load_type": None,
+            }
+
+    graph = build_graph(InflectingProvider())
+    final = graph.invoke({"text": "whatever"})
+    resp = to_response(final)
+    assert resp.request.origin == "Минск"
+    assert resp.request.destination == "Москва"
+    assert resp.status == "ok"
+    assert resp.options

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
 
     ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_timeout: float = Field(default=600.0)       # seconds; CPU inference is slow
+    ollama_keep_alive: str = Field(default="30m")      # keep model resident between calls
+    ollama_num_ctx: int = Field(default=8192)          # avoid overflowing the 4096 default
 
     # Database
     freight_db_path: str = Field(default="data/freight.db")

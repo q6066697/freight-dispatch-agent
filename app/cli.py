@@ -5,16 +5,38 @@
 Flags:
     --provider mock|openai|anthropic|ollama   override LLM_PROVIDER
     --json                                     print the full response as JSON
+    --verbose                                  print extraction, SQL, guard verdict,
+                                               row/option counts and the sql path
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from app.db import db_path
-from app.graph import dispatch
+from app.graph import run_graph, to_response
 from db.seed import build
+
+
+def _print_verbose(final: dict) -> None:
+    req = final.get("request") or {}
+    attempts = final.get("sql_attempts") or []
+    print("=== VERBOSE ===", file=sys.stderr)
+    print("extracted (normalized):", file=sys.stderr)
+    print(json.dumps(req, ensure_ascii=False, indent=2), file=sys.stderr)
+    print(f"\nsql_path: {final.get('sql_path')}", file=sys.stderr)
+    for a in attempts:
+        verdict = "OK" if a.get("ok") else f"BLOCKED ({a.get('reason')})"
+        print(f"  [{a.get('path')}] attempt {a.get('attempt')}: {verdict}", file=sys.stderr)
+        if a.get("raw"):
+            print(f"    SQL: {a['raw']}", file=sys.stderr)
+    print(f"\nrows: {len(final.get('rows') or [])}  "
+          f"options: {len(final.get('options') or [])}", file=sys.stderr)
+    steps = ">".join(s["step"] for s in final.get("trace", []))
+    print(f"steps: {steps}", file=sys.stderr)
+    print("=== END VERBOSE ===\n", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,13 +44,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("text", help="Free-text cargo request (Russian)")
     parser.add_argument("--provider", default=None, help="Override LLM provider")
     parser.add_argument("--json", action="store_true", help="Print full JSON response")
+    parser.add_argument("--verbose", action="store_true", help="Print pipeline internals")
     args = parser.parse_args(argv)
 
     if not db_path().exists():
         print("Building synthetic database...", file=sys.stderr)
         build()
 
-    resp = dispatch(args.text, provider_name=args.provider)
+    final = run_graph(args.text, provider_name=args.provider)
+    if args.verbose:
+        _print_verbose(final)
+    resp = to_response(final)
 
     if args.json:
         print(resp.model_dump_json(indent=2))

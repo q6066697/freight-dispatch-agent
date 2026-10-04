@@ -56,7 +56,8 @@ def _percentile(data: list[float], p: float) -> float:
 
 
 def run(provider_name: str | None = None) -> dict:
-    provider = get_provider(provider_name)
+    # Default to the offline mock explicitly, independent of any local .env.
+    provider = get_provider(provider_name or "mock")
     graph = build_graph(provider)
     cases = load_cases()
 

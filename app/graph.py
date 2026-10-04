@@ -118,8 +118,11 @@ def to_response(state: dict) -> DispatchResponse:
     )
 
 
+def run_graph(text: str, provider_name: str | None = None) -> dict:
+    """Run one request end-to-end and return the raw final graph state."""
+    return get_graph(provider_name).invoke({"text": text})
+
+
 def dispatch(text: str, provider_name: str | None = None) -> DispatchResponse:
     """Run one request end-to-end and return the API-shaped response."""
-    graph = get_graph(provider_name)
-    final = graph.invoke({"text": text})
-    return to_response(final)
+    return to_response(run_graph(text, provider_name))

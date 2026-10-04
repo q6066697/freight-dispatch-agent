@@ -29,6 +29,7 @@ class DispatchState(TypedDict, total=False):
     # sql_agent
     sql: str | None
     sql_done: bool
+    sql_path: str | None  # llm_sql | fallback_sql | none
     sql_attempts: Annotated[list[dict[str, Any]], operator.add]
     rows: list[dict[str, Any]]
 

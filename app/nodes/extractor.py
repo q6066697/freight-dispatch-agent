@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from app.llm.base import LLMProvider
+from app.normalize import normalize_request
 from app.schemas import ExtractedRequest
 from app.state import DispatchState
 
 
 def extractor_node(state: DispatchState, provider: LLMProvider) -> dict:
     raw = provider.extract_request(state["text"])
-    request = ExtractedRequest.from_raw(raw)
+    normalized = normalize_request(raw)
+    request = ExtractedRequest.from_raw(normalized)
     needs_clarify = not request.is_complete
 
     step = {

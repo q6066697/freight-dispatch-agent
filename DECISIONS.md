@@ -52,6 +52,44 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D14 — Grounding: no_options reply is deterministic; LLM reply is guard-checked
+**Decision:** The responder never invents data. When there are no options (any
+status without options) the reply is a fixed Russian template built in Python. When
+options exist, the LLM composes the reply from the options list only, then
+`guardrails/output_guard.py` verifies every carrier name and price in the text is
+present in `state.options`; on any mismatch we fall back to a deterministic grounded
+template and emit an `output_guard_blocked` trace event.
+**Why:** A real 7B model (ollama/qwen2.5) invented two carriers and prices on a
+`no_options` request (see docs/case-hallucination.md). Mock hid it. Deterministic
+templates for the empty case + an output guard for the non-empty case make
+hallucinated carriers/prices impossible to reach the client.
+
+## D15 — Deterministic city normalization + fallback SQL after the LLM
+**Decision:** After extraction, `app/normalize.py` maps inflected/mis-cased city
+names to canonical forms (словарь стемов). The `sql_agent` first tries LLM SQL
+(guarded, read-only); if no valid query, or a valid query returns 0 rows for a
+complete request, it runs a trusted **parameterized** fallback query
+(`app/retrieval.py`). The trace records `sql_path = llm_sql | fallback_sql | none`.
+**Why:** On CPU a small model writes shaky SQL and echoes inflected city strings
+("минска"/"москву"), yielding false `no_options`. Normalization + a deterministic
+fallback make retrieval reliable regardless of model quality, while still exercising
+the LLM path when it works.
+
+## D16 — Ollama runtime is env-configurable; larger context by default
+**Decision:** `OLLAMA_TIMEOUT` (600s), `OLLAMA_KEEP_ALIVE` (30m) and
+`OLLAMA_NUM_CTX` (8192) are read from env. num_ctx defaults to 8192 so the Russian
+system prompts do not overflow the model's default 4096 window.
+**Why:** CPU inference is slow (~minutes/call); a long timeout and keep-alive avoid
+reloading the model, and 8192 context prevents silent prompt truncation that garbles
+extraction/SQL.
+
+## D17 — Seed data uses country-correct legal forms and phone codes
+**Decision:** Carriers use realistic forms by country (BY: ООО/ОДО/ЧТУП/ИП with
++375 25/29/33/44; RU: ООО/ИП +7; LT: UAB +370; PL: Sp. z o.o. +48), derived from
+the carrier's home city. Pinned eval prices are recomputed after the reseed.
+**Why:** The author is an ex-logistician; the domain must look credible to a
+reviewer. "ТОО" is Kazakh, not Belarusian — it was wrong.
+
 ## D12 — Central supervisor node with worker-return loop
 **Decision:** Build the graph as `START → supervisor`, where `supervisor` holds all
 routing logic (a conditional-edge `route()` that reads state flags) and every worker

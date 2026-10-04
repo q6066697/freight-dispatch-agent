@@ -12,26 +12,8 @@ import re
 
 from app.guardrails.input_guard import screen_input
 from app.llm.base import LLMProvider
-
-# canonical city -> lowercase stems (handles Russian case inflection + slang)
-_CITY_STEMS: dict[str, list[str]] = {
-    "Минск": ["минск"],
-    "Брест": ["брест"],
-    "Гомель": ["гомел"],
-    "Витебск": ["витебск"],
-    "Могилёв": ["могил"],
-    "Гродно": ["гродн"],
-    "Москва": ["москв"],
-    "Санкт-Петербург": ["петербург", "питер", "спб", "санкт"],
-    "Смоленск": ["смоленск"],
-    "Брянск": ["брянск"],
-    "Калининград": ["калининград"],
-    "Вильнюс": ["вильн"],
-    "Каунас": ["каунас"],
-    "Варшава": ["варшав"],
-    "Гданьск": ["гданьск", "гдан"],
-    "Лодзь": ["лодз"],
-}
+from app.normalize import CITY_STEMS as _CITY_STEMS
+from app.reply_templates import grounded_reply
 
 _BODY_PATTERNS = [
     ("реф", re.compile(r"рефриж|\bреф\b|\bрефы?\b|рефка|рефрижератор")),
@@ -223,29 +205,8 @@ class MockProvider(LLMProvider):
         return sql
 
     def compose_reply(self, request: dict, options: list[dict]) -> str:
-        origin = request.get("origin") or "?"
-        destination = request.get("destination") or "?"
-        if not options:
-            return (
-                f"К сожалению, по маршруту {origin} — {destination} сейчас нет "
-                "свободных машин под ваши параметры. Могу поискать на другую дату "
-                "или с другим типом кузова — подскажите, как удобнее."
-            )
-
-        lines = [f"Здравствуйте! По маршруту {origin} — {destination} предлагаю варианты:"]
-        for i, opt in enumerate(options[:3], start=1):
-            price = opt.get("price") or 0
-            currency = opt.get("currency", "RUB")
-            eta = opt.get("eta_days")
-            price_str = f"{price:,.0f}".replace(",", " ")
-            eta_str = f", срок ~{eta} сут" if eta else ""
-            lines.append(
-                f"{i}) {opt.get('carrier')} — {opt.get('body_type')}, "
-                f"{opt.get('capacity_t')} т, из города {opt.get('current_city')}. "
-                f"Цена {price_str} {currency}{eta_str}."
-            )
-        lines.append("Если какой-то вариант подходит — подтвердите, оформим заявку.")
-        return "\n".join(lines)
+        # The mock is already deterministic and grounded; reuse the shared template.
+        return grounded_reply(request, options)
 
 
 def estimate_eta_days(distance_km: float) -> int:

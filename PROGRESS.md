@@ -3,6 +3,24 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S4 done (2026-10-04)
+
+### Done (S4)
+- app/llm/base.py: task-level LLMProvider ABC (classify_attack, extract_request,
+  generate_sql, compose_reply) + ChatLLMProvider (shared RU prompts, _chat) +
+  get_provider() factory. CRITICAL_FIELDS defined here.
+- app/llm/mock.py: deterministic rule-based RU extractor (inflected cities, slang
+  еврофура/тентовка/догруз, weight/volume/body/payment/urgency/date/cargo),
+  SQL template, template reply, attack classifier via input_guard rules.
+- app/llm/{openai,anthropic,ollama}_provider.py: lazy-imported real backends.
+- app/tracing.py: Langfuse no-op unless enabled.
+- tests/test_providers.py (11). Full suite: 75 passing.
+
+### Next (S5)
+- Pydantic schemas, graph state, nodes, StateGraph (mock), integration test.
+
+---
+
 ## Status: S3 done (2026-10-04)
 
 ### Done (S3)

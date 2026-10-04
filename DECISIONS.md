@@ -52,6 +52,24 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D10 — Task-level provider interface (not raw text completion)
+**Decision:** `LLMProvider` exposes task methods — `classify_attack`,
+`extract_request`, `generate_sql`, `compose_reply` — rather than only a generic
+`complete()`. Real backends share a `ChatLLMProvider` base that implements these in
+terms of one `_chat()` primitive + shared Russian prompts; the `mock` provider
+implements them directly with deterministic rules.
+**Why:** The hard requirement is that `mock` drives the ENTIRE graph and eval
+offline, deterministically. A task-level interface lets the mock produce meaningful
+structured output without reverse-engineering a prompt string, while real providers
+avoid duplicating prompts.
+
+## D11 — `missing_fields` is computed by the node, not the LLM
+**Decision:** The extractor LLM only fills field values; the extractor node
+computes `missing_fields` from a fixed set of critical fields (origin, destination,
+weight_t, body_type). Clarify branch triggers when any critical field is absent.
+**Why:** Deterministic, testable branching that does not depend on the model
+remembering to populate a bookkeeping field.
+
 ## D9 — Transparent additive pricing model
 **Decision:** `price = max(min_price, round100( base × load_factor × (1 + urgency%
 + body% ) ))` where `base = rate_per_km × distance_km`. `rate_per_km` is already

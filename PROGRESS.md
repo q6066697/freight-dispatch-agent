@@ -3,6 +3,19 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S3 done (2026-10-04)
+
+### Done (S3)
+- app/pricing.py: deterministic price_quote() + load_factor(); base = rate/km ×
+  distance, × load_factor (догруз), × (1 + urgency% + body%), min_price floor,
+  round to 100. Returns itemized PriceBreakdown. See DECISIONS D9.
+- tests/test_pricing.py: 12 passing.
+
+### Next (S4)
+- LLM providers (base/mock/openai/anthropic/ollama) + tracing no-op.
+
+---
+
 ## Status: S2 done (2026-10-04)
 
 ### Done (S2)

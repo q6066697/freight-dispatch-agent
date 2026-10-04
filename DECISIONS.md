@@ -52,6 +52,18 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D9 — Transparent additive pricing model
+**Decision:** `price = max(min_price, round100( base × load_factor × (1 + urgency%
++ body% ) ))` where `base = rate_per_km × distance_km`. `rate_per_km` is already
+body-type-specific (from `rates`). The extra `body%` (реф +8%, изотерм +4%, тент/
+борт 0%) models refrigeration/temperature-handling service cost — not vehicle cost
+— so it is not a double count. Urgency (`срочно`/next-day) = +25%. `load_factor`
+is 1.0 for a full truck; for `догруз` (partial) it is the max of weight- and
+volume-share of the truck, clamped to [0.4, 1.0]. Every component is returned in a
+`PriceBreakdown` for auditability.
+**Why:** Quotes must be explainable to a client line by line and reproducible in
+tests. Keeping it additive + a breakdown object makes both trivial.
+
 ## D8 — City-pair distances live in the `routes` table
 **Decision:** Distances are looked up from `routes`, not computed from
 coordinates. Missing pair → request cannot be priced → responder explains.

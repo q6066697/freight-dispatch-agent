@@ -3,6 +3,22 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S8 done (2026-10-04)
+
+### Done (S8)
+- README.md: EN with Mermaid graph diagram, node table, why-deterministic-pricing,
+  guardrails explanation, eval metrics table (from results.md), quick start
+  (mock/real/Docker), limitations, Author (https://github.com/q6066697), short RU
+  section.
+- NOTE: `docker build` could not be run here — Docker Desktop engine not running
+  (CLI present, daemon unreachable). Dockerfile/compose reviewed; build left for the
+  user via `docker compose up --build`.
+
+### Next (S9)
+- Final full pytest + eval run, update PROGRESS, print summary.
+
+---
+
 ## Status: S7 done (2026-10-04)
 
 ### Done (S7)

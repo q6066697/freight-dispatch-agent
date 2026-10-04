@@ -14,3 +14,11 @@ def test_eval_thresholds():
     assert m["sql_validity_rate"] == 1.0
     assert m["price_correctness"] == 1.0
     assert m["status_accuracy"] >= 0.95
+    assert m["hallucination_rate"] == 0.0, "mock replies must be grounded"
+
+
+def test_eval_subset_and_ids():
+    m = run("mock", ids=["normal_01", "attack_01"])
+    assert m["n_cases"] == 2
+    m2 = run("mock", limit=3)
+    assert m2["n_cases"] == 3

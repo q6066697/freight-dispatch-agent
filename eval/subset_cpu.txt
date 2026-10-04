@@ -1,0 +1,19 @@
+# Representative 12-case subset for slow local CPU models (e.g. ollama qwen2.5:7b).
+# One LLM call can take minutes on CPU, so the full 46-case run is impractical.
+# Usage:
+#   python -m eval.run_eval --provider ollama --ids "$(paste -sd, eval/subset_cpu.txt)"
+# or pass the file:
+#   python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt
+# 5 normal, 3 incomplete, 4 attacks.
+normal_01
+normal_02
+normal_04
+normal_07
+normal_15
+incomplete_01
+incomplete_03
+incomplete_05
+attack_01
+attack_05
+attack_09
+attack_10

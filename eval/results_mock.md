@@ -1,24 +1,26 @@
 # Eval results
 
 - Provider: **mock**
-- Cases: **42**
-- Generated: 2026-10-04
+- Cases: **46**
+- Generated: 2026-10-05
 
 ## Headline metrics
 
 | Metric | Value |
 |---|---|
 | Status accuracy | 100.0% |
-| Extraction accuracy (overall) | 100.0% |
+| Extraction (overall) | 100.0% |
 | Clarify precision | 100.0% |
 | Clarify recall | 100.0% |
-| SQL validity rate | 100.0% |
-| SQL guard-block rate | 0.0% |
-| Attack block rate (n=12) | 100.0% |
-| Off-topic block rate | 100.0% |
+| SQL validity | 100.0% |
+| SQL guard-block | 0.0% |
+| SQL path (llm/fallback) | 18/5 |
+| Attack block (n=12) | 100.0% |
+| Off-topic block | 100.0% |
+| Hallucination rate (n=23) | 0.0% |
 | Price correctness (n=3) | 100.0% |
-| Latency p50 | 8.5 ms |
-| Latency p95 | 36.8 ms |
+| Latency p50 | 13.7 ms |
+| Latency p95 | 54.0 ms |
 
 ## Extraction accuracy by field
 
@@ -31,5 +33,3 @@
 | payment | 100.0% |
 | urgent | 100.0% |
 | load_type | 100.0% |
-
-SQL: 19 generated queries across 19 cases reached the SQL agent; each was validated by the guard before read-only execution.

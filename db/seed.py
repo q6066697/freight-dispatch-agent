@@ -52,23 +52,43 @@ ROUTE_PAIRS = [
     ("Варшава", "Лодзь", 135),
 ]
 
+# Legal forms are country-correct (D17): BY uses ООО/ОДО/ЧТУП/ИП, RU ООО/ИП,
+# LT UAB, PL Sp. z o.o. Phone country code is derived from the home city.
 CARRIER_NAMES = [
-    ("ТОО «БелТрансЛогистик»", "Минск"),
+    ("ООО «БелТрансЛогистик»", "Минск"),
+    ("ЧТУП «ДальнобойБай»", "Минск"),
     ("ИП Ковалёв А.С.", "Минск"),
-    ("ООО «Запад-Карго»", "Брест"),
-    ("ТранзитАвто", "Гомель"),
+    ("ОДО «Запад-Карго»", "Брест"),
+    ("ООО «ГомельАвтоТранс»", "Гомель"),
     ("ИП Савицкий В.П.", "Витебск"),
-    ("ООО «Евродоставка»", "Москва"),
-    ("АвтоПуть", "Смоленск"),
+    ("ЧТУП «МогилёвЛогистик»", "Могилёв"),
     ("ИП Мороз Д.И.", "Гродно"),
-    ("ООО «СеверТранс»", "Санкт-Петербург"),
-    ("Балтик Лайн", "Калининград"),
+    ("ООО «Евродоставка»", "Москва"),
     ("ИП Петров С.Н.", "Брянск"),
-    ("ООО «Виа-Карго»", "Вильнюс"),
-    ("ПольшаТранс", "Варшава"),
-    ("ИП Романюк К.А.", "Могилёв"),
-    ("ООО «ГрузСервис»", "Минск"),
+    ("ООО «СеверТранс»", "Санкт-Петербург"),
+    ("ООО «Балтик Лайн»", "Калининград"),
+    ("ИП Соколов А.А.", "Смоленск"),
+    ("UAB Via Cargo", "Вильнюс"),
+    ("Sp. z o.o. PolTrans", "Варшава"),
 ]
+
+BY_CITIES = {"Минск", "Брест", "Гомель", "Витебск", "Могилёв", "Гродно"}
+RU_CITIES = {"Москва", "Санкт-Петербург", "Смоленск", "Брянск", "Калининград"}
+LT_CITIES = {"Вильнюс", "Каунас"}
+PL_CITIES = {"Варшава", "Гданьск", "Лодзь"}
+
+
+def _phone(city: str, rng: random.Random) -> str:
+    if city in BY_CITIES:
+        code = rng.choice([25, 29, 33, 44])
+        return f"+375 {code} {rng.randint(100, 999)}-{rng.randint(10, 99)}-{rng.randint(10, 99)}"
+    if city in RU_CITIES:
+        return f"+7 {rng.randint(900, 999)} {rng.randint(100, 999)}-{rng.randint(10, 99)}-{rng.randint(10, 99)}"
+    if city in LT_CITIES:
+        return f"+370 {rng.randint(600, 699)} {rng.randint(10000, 99999)}"
+    if city in PL_CITIES:
+        return f"+48 {rng.randint(500, 899)} {rng.randint(100, 999)} {rng.randint(100, 999)}"
+    return "+000 000 000"
 
 
 def _rng() -> random.Random:
@@ -97,7 +117,7 @@ def build(db_path: Path | None = None) -> Path:
             rating = round(rng.uniform(3.6, 5.0), 1)
             payment = rng.choice(["cash", "noncash", "both", "both"])
             vat = 1 if payment in ("noncash", "both") and rng.random() < 0.7 else 0
-            phone = f"+375{rng.randint(25, 44)}{rng.randint(1000000, 9999999)}"
+            phone = _phone(city, rng)
             carriers.append((i, name, city, phone, rating, payment, vat))
         conn.executemany(
             "INSERT INTO carriers (id,name,home_city,phone,rating,payment_terms,vat) "

@@ -17,8 +17,8 @@
 | Attack block rate (n=12) | 100.0% |
 | Off-topic block rate | 100.0% |
 | Price correctness (n=3) | 100.0% |
-| Latency p50 | 9.1 ms |
-| Latency p95 | 43.9 ms |
+| Latency p50 | 8.5 ms |
+| Latency p95 | 36.8 ms |
 
 ## Extraction accuracy by field
 

@@ -3,6 +3,25 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: COMPLETE (S9 done, 2026-10-04)
+
+### Final verification (clean rebuild)
+- Deleted data/, re-seeded from scratch: carriers=15, trucks=40, routes=44, rates=25.
+- pytest: **90 passed**. ruff: **all checks passed**.
+- eval (mock, 42 cases): status 100%, extraction 100% (all fields), clarify P/R 100%,
+  SQL validity 100%, attack block 100% (n=12), offtopic 100%, price 100% (n=3),
+  latency p50 ~9 ms / p95 ~37 ms.
+- Docker: image build NOT verified locally (Docker Desktop engine not running);
+  Dockerfile + compose reviewed. User can run `docker compose up --build`.
+
+### Manual checks recommended before publishing
+- Start Docker Desktop and run `docker compose up --build`; hit /health and /dispatch.
+- (Optional) Try a real model: set LLM_PROVIDER + key in .env, rerun eval, update
+  the README metrics table / results.md for the real-model column.
+- Create the GitHub repo under q6066697 and push (push was intentionally not done).
+
+---
+
 ## Status: S8 done (2026-10-04)
 
 ### Done (S8)

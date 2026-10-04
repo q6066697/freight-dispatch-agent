@@ -234,14 +234,15 @@ class MockProvider(LLMProvider):
 
         lines = [f"Здравствуйте! По маршруту {origin} — {destination} предлагаю варианты:"]
         for i, opt in enumerate(options[:3], start=1):
-            price = opt.get("price")
+            price = opt.get("price") or 0
             currency = opt.get("currency", "RUB")
             eta = opt.get("eta_days")
-            eta_str = f", срок ~{eta} сут." if eta else ""
+            price_str = f"{price:,.0f}".replace(",", " ")
+            eta_str = f", срок ~{eta} сут" if eta else ""
             lines.append(
                 f"{i}) {opt.get('carrier')} — {opt.get('body_type')}, "
                 f"{opt.get('capacity_t')} т, из города {opt.get('current_city')}. "
-                f"Цена {price:,.0f} {currency}{eta_str}.".replace(",", " ")
+                f"Цена {price_str} {currency}{eta_str}."
             )
         lines.append("Если какой-то вариант подходит — подтвердите, оформим заявку.")
         return "\n".join(lines)

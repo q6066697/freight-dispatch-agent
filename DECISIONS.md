@@ -52,6 +52,22 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D12 — Central supervisor node with worker-return loop
+**Decision:** Build the graph as `START → supervisor`, where `supervisor` holds all
+routing logic (a conditional-edge `route()` that reads state flags) and every worker
+node (`input_guard, extractor, clarify, sql_agent, pricing, responder`) routes back
+to `supervisor`. The supervisor dispatches the next worker or `END`.
+**Why:** This is the canonical LangGraph supervisor pattern and makes control flow a
+single inspectable function instead of ad-hoc edges scattered between nodes — easier
+to test and to draw in the README Mermaid diagram.
+
+## D13 — `trace` and `sql_attempts` use additive reducers
+**Decision:** State keys `trace` and `sql_attempts` are `Annotated[list, add]` so
+each node returns only its own entry and LangGraph concatenates. Other keys use the
+default replace reducer.
+**Why:** Nodes stay simple (no read-modify-write of the whole list) and the step
+trace is assembled correctly even though the supervisor loop revisits nodes.
+
 ## D10 — Task-level provider interface (not raw text completion)
 **Decision:** `LLMProvider` exposes task methods — `classify_attack`,
 `extract_request`, `generate_sql`, `compose_reply` — rather than only a generic

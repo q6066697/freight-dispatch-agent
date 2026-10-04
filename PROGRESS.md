@@ -3,6 +3,24 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S5 done (2026-10-04)
+
+### Done (S5)
+- app/schemas.py: ExtractedRequest (from_raw computes missing_fields), CarrierOption,
+  API models (DispatchRequest/Response, StepTrace, HealthResponse).
+- app/state.py: DispatchState TypedDict; trace & sql_attempts additive reducers.
+- app/nodes/: input_guard (rule+LLM, polite refusals), extractor, clarify,
+  sql_agent (guard + up to 2 self-heal retries, read-only exec), pricing_node
+  (dedupe per carrier, sort by price), responder.
+- app/graph.py: supervisor + route() conditional edges, build_graph/get_graph/
+  dispatch/to_response.
+- tests/conftest.py (auto-seed DB), tests/test_graph.py (9). Full suite: 84 passing.
+
+### Next (S6)
+- eval/dataset.jsonl (≥40, 10+ attacks) + eval/run_eval.py + results.md.
+
+---
+
 ## Status: S4 done (2026-10-04)
 
 ### Done (S4)

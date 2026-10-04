@@ -36,7 +36,34 @@ write the reply even with empty options → fabrication.
   = 18/5. results_mock.md regenerated.
 
 ### Real-model control run (ollama qwen2.5:7b, CPU)
-_Pending — see "Control run output" appended below once the background run finishes._
+Command:
+```
+LLM_PROVIDER=ollama LLM_MODEL=qwen2.5:7b \
+  python -m app.cli --verbose "нужно отвезти 12 тонн труб из минска в москву в четверг, тент, оплата безнал"
+```
+Result: ran 00:37:20 → 01:13:54 (~36 min). The pipeline advanced through
+input_guard → extractor → sql_agent → pricing and **reached the `responder` node
+with options in hand** (so the old no_options/hallucination bug did NOT recur). The
+final `responder` LLM call then exceeded the configured 600s per-call timeout:
+
+```
+httpx.ReadTimeout: timed out
+During task with name 'responder' and id '...'
+  File "app/nodes/responder.py", line 29, in responder_node
+    llm_reply = provider.compose_reply(request, top)
+  File "app/llm/ollama_provider.py", line 28, in _chat
+    resp = httpx.post(...)
+EXIT=0 (process exit; the graph raised inside the responder step)
+```
+
+Interpretation: every earlier LLM call (attack-classify, extract, SQL) completed
+under 600s; only the responder generation on CPU exceeded it. This is a
+**performance limit of a 7B model on CPU**, not a logic bug — the grounding /
+normalization / fallback fixes worked right up to the final generation. The timeout
+is env-configurable by design (D16): raise `OLLAMA_TIMEOUT` (e.g. 1200) for CPU, or
+use a faster model (e.g. `llama3.2:3b`, which is installed) for an end-to-end reply.
+Per the task's "call the real model minimally" rule and the spec'd 600s default, the
+default was left unchanged and the run was not repeated.
 
 ---
 

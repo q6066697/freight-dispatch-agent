@@ -3,6 +3,51 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S11 "Real-model eval robustness" done (2026-10-05)
+
+### The second bug (found by real eval, ollama qwen2.5:3b)
+`run_eval --provider ollama` crashed on the 3rd case with
+`KeyError: 'distance_km'` in pricing: the model's SQL passed sql_guard and returned
+rows, but it never joined `routes` (and elsewhere confused payment/currency, filtered
+body_type by the cargo word). A safe query that is still wrong.
+
+### Fixes (D18–D20)
+- **LLM-SQL result contract** (`app/sql_contract.py`): rows accepted only if required
+  columns present + numeric types parse, AND they pass a **semantic filter**
+  (body_type, capacity_t>=weight_t, payment_terms). Else deterministic fallback with
+  `fallback_reason` ∈ {guard_rejected, zero_rows, missing_columns, invalid_values,
+  semantic_mismatch}. `sql_path` ∈ {llm_sql, fallback_sql, none}.
+- **Route-derived distance:** pricing looks `distance_km` up from `routes`
+  (`retrieval.route_distance`), never trusts the model; unknown lane → new
+  **no_route** status + deterministic reply. Candidate/fallback query no longer joins
+  routes.
+- **Eval runner robustness:** each case try/except → `status=error` + exception type,
+  run continues; `error_rate` metric; streams one JSON record/case to
+  `eval/runs/<provider>_<ts>.jsonl`; `--resume <file>` skips done ids; metrics add
+  sql_path + fallback_reason distributions. Table aggregated from jsonl.
+- **Docs:** docs/case-sql-contract.md; README updated (eval table, node table,
+  result-contract paragraph, mock-vs-real links both cases).
+
+### Verification
+- pytest **129 passed**, ruff clean (tests forced to mock via conftest).
+- eval (mock, 46): status 100%, error 0%, extraction 100%, clarify P/R 100%, attack
+  100%, hallucination 0%, price 100%, SQL path llm/fallback = 18/5, fallback reasons
+  zero_rows=5. results_mock.md regenerated.
+- Real model NOT invoked this session (user runs it). dataset no_route_* now expect
+  no_route.
+
+### Overnight real-model run (PowerShell), with resume
+```powershell
+$env:LLM_PROVIDER = "ollama"; $env:LLM_MODEL = "qwen2.5:3b"; $env:OLLAMA_TIMEOUT = "1800"
+# first run (writes eval/runs/ollama_<timestamp>.jsonl):
+python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt
+# if interrupted, resume by pointing --resume at that file (newest shown here):
+$f = (Get-ChildItem eval/runs/ollama_*.jsonl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt --resume $f
+```
+
+---
+
 ## Status: S10 "Real-model hardening" done (2026-10-05)
 
 ### The bug (found on real model)

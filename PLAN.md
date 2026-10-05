@@ -25,3 +25,7 @@ All stages complete. After each: `pytest` + `ruff check .`, update `PROGRESS.md`
   tuning, CLI --verbose, eval hallucination metric + flags + no-route cases +
   subset_cpu, realistic seed data, docs/case-hallucination.md + README mock-vs-real.
   115 tests green; one real-model control run recorded in PROGRESS.md.
+- [x] **S11. Real-model eval robustness.** LLM-SQL result contract + semantic filter;
+  route-derived distance + no_route status; crash-isolated, append-only, resumable
+  eval runner; sql_path / fallback_reason / error_rate metrics;
+  docs/case-sql-contract.md. 129 tests green. Real eval to be run by the user.

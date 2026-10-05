@@ -48,8 +48,8 @@ flowchart TD
 | `input_guard` | Detect prompt injection, data-tamper, system-prompt leaks, off-topic. Rules **+** an LLM classifier; refuse politely on a hit. | rules + LLM |
 | `extractor` | Turn free text into an `ExtractedRequest` (origin, destination, cargo, weight, volume, body type, date, payment, urgency, load type). | yes |
 | `clarify` | If a critical field (origin / destination / weight / body type) is missing, ask one targeted question and stop. | no |
-| `sql_agent` | Generate a `SELECT`, pass it through the SQL guard, run it read-only. Up to 2 self-corrections on rejection. | yes (SQL only) |
-| `pricing` | Compute each option's price from the rate sheet. | **no — pure Python** |
+| `sql_agent` | Generate a `SELECT`, pass it through the SQL guard, run it read-only (≤2 self-corrections). Then **verify the rows** against a column/type contract + semantic filter; on any failure use a trusted parameterized fallback and record `sql_path` / `fallback_reason`. | yes (SQL only) |
+| `pricing` | Compute each option's price from the rate sheet. Distance is looked up from `routes` (not trusted from the model); unknown lane → `no_route`. | **no — pure Python** |
 | `responder` | Compose the final Russian reply, **grounded** in state: no options → deterministic template (no LLM); otherwise the LLM reply is checked by the output guard. | yes (guarded) |
 
 ### Why pricing is deterministic
@@ -97,6 +97,14 @@ violation the responder falls back to a deterministic grounded template and reco
 `output_guard_blocked` trace event. This is what stops a real model from inventing
 carriers (see [docs/case-hallucination.md](docs/case-hallucination.md)).
 
+**SQL result contract** (`app/sql_contract.py`) — a correctness layer, not a safety
+one. Passing the SQL guard proves a query is *safe*; it does not prove the rows mean
+what pricing expects. The contract requires the needed columns (correct types) and a
+semantic filter drops rows that don't match the request (body type, capacity, payment
+terms). Rows that fail either are discarded in favour of the deterministic fallback.
+This is what turned a real model's `KeyError`-crashing query into a graceful fallback
+(see [docs/case-sql-contract.md](docs/case-sql-contract.md)).
+
 ---
 
 ## Eval
@@ -110,18 +118,27 @@ graph and reports:
 | Metric | Value (mock) |
 |---|---|
 | Status accuracy | 100.0% |
+| Error rate | 0.0% |
 | Extraction accuracy (overall) | 100.0% |
 | Clarify precision / recall | 100.0% / 100.0% |
-| SQL validity rate | 100.0% |
-| SQL guard-block rate | 0.0% |
+| SQL path (llm / fallback) | 18 / 5 |
+| Fallback reasons | zero_rows=5 |
 | **Attack block rate (n=12)** | **100.0%** |
 | Off-topic block rate | 100.0% |
 | **Hallucination rate (n=23)** | **0.0%** |
 | Price correctness vs. reference (n=3) | 100.0% |
-| Latency p50 / p95 | ~16 ms / ~52 ms |
+| Latency p50 / p95 | ~30 ms / ~55 ms |
 
 Per-field extraction accuracy is 100% on this dataset. The full table is written to
-`eval/results_<provider>.md` on every run (so a mock run never overwrites a real one).
+`eval/results_<provider>.md` on every run (mock never overwrites real), and one JSON
+record per case is streamed to `eval/runs/<provider>_<timestamp>.jsonl`.
+
+The **SQL path** and **fallback reasons** rows are the headline numbers for a real
+model: how often the model produced usable SQL (`llm_sql`) versus how often the
+deterministic fallback had to rescue it, and why (`zero_rows`, `missing_columns`,
+`semantic_mismatch`, …). The harness is **crash-isolated** (a failing case becomes a
+`status=error` record, the run continues) and **resumable** (`--resume`), because a
+real run is ~15 min/case on CPU.
 
 Run it:
 
@@ -129,6 +146,8 @@ Run it:
 python -m eval.run_eval                                   # mock, all 46 cases
 python -m eval.run_eval --ids-file eval/subset_cpu.txt    # 12-case subset
 python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt  # real model
+# resume an interrupted run:
+python -m eval.run_eval --provider ollama --resume eval/runs/ollama_<timestamp>.jsonl
 ```
 
 ## Mock vs. real model
@@ -145,20 +164,27 @@ The two modes measure different things, and it matters:
   harness, so the same numbers become a genuine measure of model quality —
   extraction accuracy, SQL validity, and especially **hallucination rate**.
 
-This distinction is not academic. A real 7B model (ollama/qwen2.5) once invented two
-non-existent carriers and prices on a no-options request — the mock had hidden it.
-That bug and its fix (deterministic no-options reply, an output guard that checks
-every carrier/price against `state.options`, city normalization, and a deterministic
-SQL fallback) are written up in **[docs/case-hallucination.md](docs/case-hallucination.md)**.
+This distinction is not academic — testing on a real local model surfaced two bugs the
+mock had hidden, each now fixed and regression-tested:
 
-Real-model metrics (fill in after a run):
+- A 7B model **invented two non-existent carriers and prices** on a no-options request.
+  Fix: deterministic no-options reply + an output guard checking every carrier/price
+  against `state.options`. → **[docs/case-hallucination.md](docs/case-hallucination.md)**
+- A 3B model produced a **guard-safe but wrong** query (no `routes` join → crash;
+  elsewhere it confused payment with currency) → `KeyError` that killed the whole run.
+  Fix: an LLM-SQL result contract + semantic filter, route-derived distance, a
+  `no_route` status, and a crash-isolated resumable runner.
+  → **[docs/case-sql-contract.md](docs/case-sql-contract.md)**
 
-| Metric | mock | ollama / qwen2.5:7b |
+Real-model metrics (fill in after a run — use `--ids-file eval/subset_cpu.txt`):
+
+| Metric | mock | ollama / qwen2.5 |
 |---|---|---|
 | Extraction accuracy | 100% | _TBD_ |
-| SQL validity | 100% | _TBD_ |
+| SQL path (llm / fallback) | 18 / 5 | _TBD_ |
 | Hallucination rate | 0% | _TBD_ |
 | Attack block rate | 100% | _TBD_ |
+| Error rate | 0% | _TBD_ |
 
 ---
 
@@ -176,7 +202,7 @@ python -m db.seed                 # build data/freight.db (synthetic)
 python -m app.cli "Нужно отвезти 12 тонн труб из Минска в Москву в четверг, тент, безнал"
 
 pytest -q && ruff check .         # tests green, lint clean
-python -m eval.run_eval           # eval table + eval/results.md
+python -m eval.run_eval           # eval table + eval/results_mock.md
 ```
 
 Run the HTTP API:
@@ -229,17 +255,18 @@ app/
   schemas.py         Pydantic models (request, options, API)
   pricing.py         deterministic pricing
   normalize.py       canonical cities / enums after extraction
-  retrieval.py       trusted parameterized fallback query
-  reply_templates.py deterministic grounded / no-options replies
+  retrieval.py       trusted parameterized fallback query + route distance
+  sql_contract.py    LLM-SQL result contract + semantic filter
+  reply_templates.py deterministic grounded / no-options / no-route replies
   db.py              read-only SQLite connection + table whitelist
   api.py  cli.py     FastAPI + command line (cli has --verbose)
   nodes/             input_guard, extractor, clarify, sql_agent, pricing_node, responder
   llm/               provider abstraction: mock (default), openai, anthropic, ollama
   guardrails/        sql_guard.py, input_guard.py, output_guard.py
 db/                  schema.sql + seed.py (synthetic data)
-eval/                dataset.jsonl, run_eval.py, results_<provider>.md, subset_cpu.txt
-docs/                case-hallucination.md
-tests/               pytest suite (guardrails, pricing, graph, API, eval, normalize)
+eval/                dataset.jsonl, run_eval.py, results_<provider>.md, subset_cpu.txt, runs/
+docs/                case-hallucination.md, case-sql-contract.md
+tests/               pytest suite (guardrails, pricing, graph, API, eval, normalize, sql_contract)
 ```
 
 ---

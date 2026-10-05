@@ -3,6 +3,39 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S12 "Real-model results & release prep" done (2026-10-05)
+
+### Real eval analysed (ollama qwen2.5:3b, CPU, n=12 subset)
+Results: status 83.3%, errors 0%, extraction 96.8% (body_type 83%), clarify P/R
+60/100%, SQL path llm/fallback 0/3, attack 100%, hallucination 0%, price 66.7%,
+p50 ~166s / p95 ~1084s. Both status misses (normal_02 «еврофура», normal_07 «фура»)
+= one model error: body_type left null on slang → false clarify (normal_07 price miss
+is downstream). No labeling errors, no pipeline bugs. LLM-SQL 0/3 usable → fallback
+carried every priced case → 0% hallucination, 0% crashes (S10/S11 fixes held).
+Full write-up: docs/real-model-error-analysis.md.
+
+### Changes
+- D21 deterministic body-type backfill from raw text (slang lexicon) in extractor
+  when the model leaves body_type empty. General, not overfit; mock eval unchanged
+  (100%); NOT yet re-validated on the real model.
+- README "Mock vs real model" filled with the qwen2.5:3b column (conditions noted:
+  CPU-only, n=12, indicative) + domain Future work (подача/empty-run, load date &
+  availability, cargo dimensions/длинномер, догруз/groupage, stronger model/GPU).
+
+### Verification
+- pytest 131 passed, ruff clean. eval(mock,46) still all-green (hallucination 0%).
+
+### Publication safety checks (all pass)
+- `git log --all -- .env` empty → .env never tracked. Tracked .env* = only
+  .env.example. `.env` currently git-ignored.
+- No real key tokens (sk-/sk-ant-) anywhere in history. Broader api_key/secret/token
+  scan: only env-backed reads + README placeholder `sk-ant-...`; .env.example values
+  empty.
+- .gitignore covers .env, .venv/, data/*.db, eval/runs/.
+- Repo ready to publish; push deferred to the user (manual GitHub repo + first push).
+
+---
+
 ## Status: S11 "Real-model eval robustness" done (2026-10-05)
 
 ### The second bug (found by real eval, ollama qwen2.5:3b)

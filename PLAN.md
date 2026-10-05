@@ -29,3 +29,7 @@ All stages complete. After each: `pytest` + `ruff check .`, update `PROGRESS.md`
   route-derived distance + no_route status; crash-isolated, append-only, resumable
   eval runner; sql_path / fallback_reason / error_rate metrics;
   docs/case-sql-contract.md. 129 tests green. Real eval to be run by the user.
+- [x] **S12. Real-model results & release prep.** Error analysis of the real run
+  (docs/real-model-error-analysis.md); deterministic body-type backfill (D21);
+  README real-metrics table + domain Future work; publication safety checks
+  (no secrets in tree/history, .env never tracked). 131 tests green. Ready to push.

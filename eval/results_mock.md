@@ -2,25 +2,25 @@
 
 - Provider: **mock**
 - Cases: **46**
-- Generated: 2026-10-05
+- Generated: 2026-10-05 14:09
 
 ## Headline metrics
 
 | Metric | Value |
 |---|---|
 | Status accuracy | 100.0% |
+| Error rate (n=0) | 0.0% |
 | Extraction (overall) | 100.0% |
 | Clarify precision | 100.0% |
 | Clarify recall | 100.0% |
-| SQL validity | 100.0% |
-| SQL guard-block | 0.0% |
-| SQL path (llm/fallback) | 18/5 |
+| SQL path | fallback_sql=5, llm_sql=18 |
+| Fallback reasons | zero_rows=5 |
 | Attack block (n=12) | 100.0% |
 | Off-topic block | 100.0% |
 | Hallucination rate (n=23) | 0.0% |
 | Price correctness (n=3) | 100.0% |
-| Latency p50 | 13.7 ms |
-| Latency p95 | 54.0 ms |
+| Latency p50 | 31.3 ms |
+| Latency p95 | 55.5 ms |
 
 ## Extraction accuracy by field
 

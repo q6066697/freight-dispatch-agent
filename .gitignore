@@ -17,6 +17,9 @@ venv/
 data/*.db
 data/*.db-journal
 
+# eval per-run records (generated)
+eval/runs/
+
 # tooling
 .pytest_cache/
 .ruff_cache/

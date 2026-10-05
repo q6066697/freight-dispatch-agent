@@ -1,21 +1,18 @@
-"""Evaluation harness.
+"""Evaluation harness (crash-isolated, append-only, resumable — D20).
 
-Runs labeled cases in dataset.jsonl through the graph and reports:
-  - extraction field accuracy (per field + overall)
-  - clarify precision / recall
-  - SQL validity rate, guard-block share, and LLM-vs-fallback path split
-  - attack block rate (target 100%)
-  - off-topic block rate
-  - hallucination rate (replies naming a carrier/price absent from options)
-  - price correctness vs. pinned reference values
-  - latency p50 / p95
+Each case is run independently; an exception becomes a record with status="error"
+(the run continues). Every per-case record is streamed to
+eval/runs/<provider>_<timestamp>.jsonl, and the final table is aggregated from that
+file, so an interrupted overnight run can be resumed with --resume.
 
-Prints a table and writes eval/results_<provider>.md (mock never overwrites real).
+Metrics: extraction field accuracy, clarify precision/recall, SQL validity + guard
+block, sql_path / fallback_reason distributions, attack & off-topic block rate,
+hallucination rate, price correctness, error rate, latency p50/p95.
 
 Examples:
   python -m eval.run_eval
   python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt
-  python -m eval.run_eval --limit 10 --ids normal_01,attack_05
+  python -m eval.run_eval --provider ollama --resume eval/runs/ollama_20261005_0130.jsonl
 """
 
 from __future__ import annotations
@@ -24,7 +21,8 @@ import argparse
 import json
 import math
 import time
-from datetime import date
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from app.graph import build_graph, to_response
@@ -32,15 +30,14 @@ from app.guardrails.output_guard import check_reply
 from app.llm import get_provider
 
 DATASET = Path(__file__).with_name("dataset.jsonl")
+RUNS_DIR = Path(__file__).with_name("runs")
 
 FIELDS = [
     "origin", "destination", "weight_t", "volume_m3",
     "body_type", "payment", "urgent", "load_type",
 ]
-# Cases that run extraction (i.e. not attacks/offtopic refused up front).
 EXTRACTION_CATEGORIES = {"normal", "slang", "incomplete", "edge", "no_route"}
-# Cases that end with a composed reply we can check for hallucinations.
-RESPONDED_STATUSES = {"ok", "no_options"}
+RESPONDED_STATUSES = {"ok", "no_options", "no_route"}
 
 
 def load_cases() -> list[dict]:
@@ -68,14 +65,83 @@ def _ratio(n, d):
     return (n / d) if d else None
 
 
+def evaluate_case(graph, case: dict) -> dict:
+    """Run one case and return a flat result record. Never raises."""
+    exp = case["expected"]
+    rec: dict = {
+        "id": case["id"],
+        "category": case["category"],
+        "expected_status": exp["status"],
+    }
+    t0 = time.perf_counter()
+    try:
+        final = graph.invoke({"text": case["text"]})
+        resp = to_response(final)
+        rec["latency_ms"] = (time.perf_counter() - t0) * 1000
+        rec["status"] = resp.status
+        rec["error"] = None
+        rec["sql_path"] = final.get("sql_path")
+        rec["fallback_reason"] = final.get("fallback_reason")
+
+        fields: dict[str, bool] = {}
+        gold = exp.get("fields", {})
+        if case["category"] in EXTRACTION_CATEGORIES and gold:
+            for f, gold_v in gold.items():
+                if f in FIELDS:
+                    got_v = getattr(resp.request, f, None) if resp.request else None
+                    fields[f] = _norm(got_v) == _norm(gold_v)
+        rec["fields"] = fields
+
+        if resp.status in RESPONDED_STATUSES:
+            opts = [{"carrier": o.carrier, "price": o.price} for o in resp.options]
+            rec["responded"] = True
+            rec["hallucinated"] = not check_reply(resp.reply, opts).ok
+        else:
+            rec["responded"] = False
+            rec["hallucinated"] = False
+
+        if exp.get("price_rub") is not None:
+            rec["price_applicable"] = True
+            rec["price_ok"] = bool(
+                resp.options and abs(resp.options[0].price - exp["price_rub"]) < 1.0
+            )
+        else:
+            rec["price_applicable"] = False
+            rec["price_ok"] = False
+    except Exception as e:  # noqa: BLE001 - one bad case must not kill the run
+        rec["latency_ms"] = (time.perf_counter() - t0) * 1000
+        rec["status"] = "error"
+        rec["error"] = type(e).__name__
+        rec["sql_path"] = None
+        rec["fallback_reason"] = None
+        rec["fields"] = {}
+        rec["responded"] = False
+        rec["hallucinated"] = False
+        rec["price_applicable"] = False
+        rec["price_ok"] = False
+    return rec
+
+
+def _read_records(path: Path) -> list[dict]:
+    if not path or not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            out.append(json.loads(line))
+    return out
+
+
 def run(
     provider_name: str | None = None,
     *,
     limit: int | None = None,
     ids: list[str] | None = None,
     progress: bool = False,
+    out_path: str | Path | None = None,
+    resume: str | Path | None = None,
 ) -> dict:
-    # Default to the offline mock explicitly, independent of any local .env.
     effective = provider_name or "mock"
     provider = get_provider(effective)
     graph = build_graph(provider)
@@ -87,104 +153,102 @@ def run(
     if limit:
         cases = cases[:limit]
 
-    latencies: list[float] = []
+    # Resume: reuse the file, keep its records, skip ids already done.
+    target = Path(resume) if resume else (Path(out_path) if out_path else None)
+    records = _read_records(Path(resume)) if resume else []
+    done = {r["id"] for r in records}
+    if target:
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+    pending = [c for c in cases if c["id"] not in done]
+    for idx, case in enumerate(pending, start=1):
+        rec = evaluate_case(graph, case)
+        records.append(rec)
+        if target:
+            with target.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        if progress:
+            tag = rec["error"] or rec["status"]
+            print(f"[{idx}/{len(pending)}] {case['id']:<14} {tag:<14} "
+                  f"{rec['latency_ms'] / 1000:6.1f}s", flush=True)
+
+    m = aggregate(records)
+    m["provider"] = provider.name
+    if target:
+        m["run_file"] = str(target)
+    return m
+
+
+def aggregate(records: list[dict]) -> dict:
     field_hits = {f: [0, 0] for f in FIELDS}
     clarify = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
     attack_total = attack_blocked = 0
     offtopic_total = offtopic_blocked = 0
-    sql_total = sql_ok = sql_blocked = 0
-    sql_cases = sql_llm = sql_fallback = 0
     price_total = price_ok = 0
-    status_hits = 0
-    responded = hallucinated = 0
+    responded = hallucinated = status_hits = errors = 0
+    sql_paths: Counter = Counter()
+    fallback_reasons: Counter = Counter()
+    latencies: list[float] = []
 
-    for idx, case in enumerate(cases, start=1):
-        exp = case["expected"]
-        t0 = time.perf_counter()
-        final = graph.invoke({"text": case["text"]})
-        dt = (time.perf_counter() - t0) * 1000
-        latencies.append(dt)
-        resp = to_response(final)
+    for r in records:
+        latencies.append(r.get("latency_ms", 0.0))
+        status_hits += r.get("status") == r.get("expected_status")
+        errors += r.get("status") == "error"
 
-        if progress:
-            print(f"[{idx}/{len(cases)}] {case['id']:<14} "
-                  f"{resp.status:<10} {dt/1000:6.1f}s", flush=True)
-
-        if resp.status == exp["status"]:
-            status_hits += 1
-
-        gold_fields = exp.get("fields", {})
-        if case["category"] in EXTRACTION_CATEGORIES and gold_fields:
-            got = resp.request
-            for f, gold_v in gold_fields.items():
-                if f not in field_hits:
-                    continue
+        for f, ok in (r.get("fields") or {}).items():
+            if f in field_hits:
                 field_hits[f][1] += 1
-                if _norm(getattr(got, f, None) if got else None) == _norm(gold_v):
-                    field_hits[f][0] += 1
+                field_hits[f][0] += bool(ok)
 
-        if case["category"] in EXTRACTION_CATEGORIES:
-            want = exp["status"] == "clarify"
-            pred = resp.status == "clarify"
+        if r.get("category") in EXTRACTION_CATEGORIES:
+            want = r.get("expected_status") == "clarify"
+            pred = r.get("status") == "clarify"
             key = ("tp" if pred else "fn") if want else ("fp" if pred else "tn")
             clarify[key] += 1
 
-        if case["category"] == "attack":
+        if r.get("category") == "attack":
             attack_total += 1
-            attack_blocked += resp.status == "refused"
-        if case["category"] == "offtopic":
+            attack_blocked += r.get("status") == "refused"
+        if r.get("category") == "offtopic":
             offtopic_total += 1
-            offtopic_blocked += resp.status == "refused"
+            offtopic_blocked += r.get("status") == "refused"
 
-        attempts = final.get("sql_attempts") or []
-        if attempts:
-            sql_cases += 1
-            for a in attempts:
-                sql_total += 1
-                sql_ok += bool(a["ok"])
-                sql_blocked += not a["ok"]
-        path = final.get("sql_path")
-        sql_llm += path == "llm_sql"
-        sql_fallback += path == "fallback_sql"
+        if r.get("sql_path"):
+            sql_paths[r["sql_path"]] += 1
+        if r.get("fallback_reason"):
+            fallback_reasons[r["fallback_reason"]] += 1
 
-        # hallucination: does the reply name a carrier/price not in options?
-        if resp.status in RESPONDED_STATUSES:
+        if r.get("responded"):
             responded += 1
-            opt_dicts = [{"carrier": o.carrier, "price": o.price} for o in resp.options]
-            if not check_reply(resp.reply, opt_dicts).ok:
-                hallucinated += 1
+            hallucinated += bool(r.get("hallucinated"))
 
-        if exp.get("price_rub") is not None:
+        if r.get("price_applicable"):
             price_total += 1
-            if resp.options and abs(resp.options[0].price - exp["price_rub"]) < 1.0:
-                price_ok += 1
+            price_ok += bool(r.get("price_ok"))
 
-    field_acc = {f: _ratio(h, a) for f, (h, a) in field_hits.items() if a}
     prec = _ratio(clarify["tp"], clarify["tp"] + clarify["fp"])
-    rec = _ratio(clarify["tp"], clarify["tp"] + clarify["fn"])
-
+    rec_ = _ratio(clarify["tp"], clarify["tp"] + clarify["fn"])
+    n = len(records)
     return {
-        "provider": provider.name,
-        "n_cases": len(cases),
-        "status_accuracy": _ratio(status_hits, len(cases)),
-        "field_accuracy": field_acc,
+        "provider": "?",
+        "n_cases": n,
+        "status_accuracy": _ratio(status_hits, n),
+        "error_rate": _ratio(errors, n),
+        "errors": errors,
+        "field_accuracy": {f: _ratio(h, a) for f, (h, a) in field_hits.items() if a},
         "field_accuracy_overall": _ratio(
             sum(h for h, _ in field_hits.values()),
             sum(a for _, a in field_hits.values()),
         ),
         "clarify_precision": prec if prec is not None else 1.0,
-        "clarify_recall": rec if rec is not None else 1.0,
-        "sql_cases": sql_cases,
-        "sql_attempts": sql_total,
-        "sql_validity_rate": _ratio(sql_ok, sql_total),
-        "sql_guard_block_rate": _ratio(sql_blocked, sql_total),
-        "sql_llm_path": sql_llm,
-        "sql_fallback_path": sql_fallback,
+        "clarify_recall": rec_ if rec_ is not None else 1.0,
         "attack_block_rate": _ratio(attack_blocked, attack_total),
         "attack_total": attack_total,
         "offtopic_block_rate": _ratio(offtopic_blocked, offtopic_total),
         "hallucination_rate": _ratio(hallucinated, responded),
         "responded": responded,
+        "sql_path_dist": dict(sql_paths),
+        "fallback_reason_dist": dict(fallback_reasons),
         "price_cases": price_total,
         "price_correctness": _ratio(price_ok, price_total),
         "latency_p50_ms": _percentile(latencies, 50),
@@ -196,15 +260,19 @@ def _fmt_pct(x) -> str:
     return "n/a" if x is None else f"{x * 100:.1f}%"
 
 
+def _dist(d: dict) -> str:
+    return ", ".join(f"{k}={v}" for k, v in sorted(d.items())) if d else "—"
+
+
 def _rows(m: dict) -> list[tuple[str, str]]:
     return [
         ("Status accuracy", _fmt_pct(m["status_accuracy"])),
+        (f"Error rate (n={m['errors']})", _fmt_pct(m["error_rate"])),
         ("Extraction (overall)", _fmt_pct(m["field_accuracy_overall"])),
         ("Clarify precision", _fmt_pct(m["clarify_precision"])),
         ("Clarify recall", _fmt_pct(m["clarify_recall"])),
-        ("SQL validity", _fmt_pct(m["sql_validity_rate"])),
-        ("SQL guard-block", _fmt_pct(m["sql_guard_block_rate"])),
-        ("SQL path (llm/fallback)", f"{m['sql_llm_path']}/{m['sql_fallback_path']}"),
+        ("SQL path", _dist(m["sql_path_dist"])),
+        ("Fallback reasons", _dist(m["fallback_reason_dist"])),
         (f"Attack block (n={m['attack_total']})", _fmt_pct(m["attack_block_rate"])),
         ("Off-topic block", _fmt_pct(m["offtopic_block_rate"])),
         (f"Hallucination rate (n={m['responded']})", _fmt_pct(m["hallucination_rate"])),
@@ -220,7 +288,7 @@ def render_markdown(m: dict) -> str:
         "",
         f"- Provider: **{m['provider']}**",
         f"- Cases: **{m['n_cases']}**",
-        f"- Generated: {date.today().isoformat()}",
+        f"- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
         "## Headline metrics",
         "",
@@ -254,7 +322,8 @@ def main(argv: list[str] | None = None) -> dict:
     parser.add_argument("--limit", type=int, default=None, help="only first N cases")
     parser.add_argument("--ids", default=None, help="comma-separated case ids")
     parser.add_argument("--ids-file", default=None, help="file with one id per line")
-    parser.add_argument("--no-save", action="store_true", help="do not write results file")
+    parser.add_argument("--resume", default=None, help="append to / resume a run jsonl")
+    parser.add_argument("--no-save", action="store_true", help="do not write files")
     args = parser.parse_args(argv)
 
     ids: list[str] | None = None
@@ -267,12 +336,21 @@ def main(argv: list[str] | None = None) -> dict:
             if ln.strip() and not ln.startswith("#")
         ]
 
-    m = run(args.provider, limit=args.limit, ids=ids, progress=True)
+    provider = (args.provider or "mock").lower()
+    out_path = None
+    if not args.no_save and not args.resume:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = RUNS_DIR / f"{provider}_{ts}.jsonl"
+
+    m = run(args.provider, limit=args.limit, ids=ids, progress=True,
+            out_path=out_path, resume=args.resume)
     print_table(m)
     if not args.no_save:
-        out = Path(__file__).with_name(f"results_{m['provider']}.md")
-        out.write_text(render_markdown(m), encoding="utf-8")
-        print(f"\nWrote {out}")
+        results = Path(__file__).with_name(f"results_{m['provider']}.md")
+        results.write_text(render_markdown(m), encoding="utf-8")
+        print(f"\nWrote {results}")
+        if m.get("run_file"):
+            print(f"Per-case records: {m['run_file']}")
     return m
 
 

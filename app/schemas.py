@@ -69,7 +69,7 @@ class StepTrace(BaseModel):
     detail: Any | None = None
 
 
-DispatchStatus = Literal["ok", "clarify", "refused", "no_options"]
+DispatchStatus = Literal["ok", "clarify", "refused", "no_options", "no_route"]
 
 
 class DispatchResponse(BaseModel):

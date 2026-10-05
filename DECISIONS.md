@@ -52,6 +52,39 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D18 — LLM-SQL result contract + semantic filter; distance is route-derived
+**Decision:** Rows returned by the model's SQL are accepted only if they satisfy a
+column/type **contract** (`app/sql_contract.py`: carrier, plate, body_type,
+capacity_t, volume_m3, current_city, rating, rate_per_km, min_price, payment_terms,
+distance_km — numerics must parse) AND pass a deterministic **semantic filter**
+(body_type matches, capacity_t ≥ weight_t, carrier payment_terms compatible).
+Otherwise the SQL agent uses the parameterized fallback and records
+`fallback_reason ∈ {guard_rejected, zero_rows, missing_columns, invalid_values,
+semantic_mismatch}`. Pricing never trusts the model's distance: `distance_km` is
+looked up deterministically from `routes` by normalized origin/destination.
+**Why:** Real eval (ollama qwen2.5:3b) crashed with `KeyError: 'distance_km'` — the
+model's query passed the guard but didn't join `routes`, and separately confused
+payment/currency and used `body_type LIKE '%трубы%'`. A guard proves a query is
+*safe*; it cannot prove it is *correct*. The contract + semantic filter + route-derived
+distance make a wrong-but-safe query fall back deterministically instead of
+corrupting pricing. See docs/case-sql-contract.md.
+
+## D19 — Distinct `no_route` status
+**Decision:** When origin/destination are known but the pair is absent from `routes`,
+the status is `no_route` (its own deterministic reply), separate from `no_options`
+(route known, but no suitable truck).
+**Why:** The two are different answers to the client ("we don't serve that lane" vs
+"no free truck right now") and are worth measuring separately in eval.
+
+## D20 — Eval runner is crash-isolated, append-only, resumable
+**Decision:** `run_eval` wraps each case in try/except (a failing case becomes a
+record with `status="error"` and the exception type; the run continues), streams one
+JSON record per case to `eval/runs/<provider>_<timestamp>.jsonl`, supports
+`--resume <file>` (skip ids already present), and aggregates the final table from the
+jsonl. Metrics add `error_rate` and the `sql_path` / `fallback_reason` distributions.
+**Why:** A real run takes ~15 min/case on CPU; one bad case must not throw away hours
+of completed work, and an overnight run must be resumable after an interruption.
+
 ## D14 — Grounding: no_options reply is deterministic; LLM reply is guard-checked
 **Decision:** The responder never invents data. When there are no options (any
 status without options) the reply is a fixed Russian template built in Python. When

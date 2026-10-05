@@ -1,7 +1,9 @@
 """pricing node: deterministically price each candidate truck (no LLM).
 
-Produces at most one option per carrier (the cheapest), sorted by price, so the
-responder can offer genuinely different carriers rather than three trucks from one.
+Distance is NOT taken from the SQL rows — it is looked up authoritatively from
+`routes` by normalized origin/destination (D18). If the lane is unknown the request
+is `no_route`. Otherwise each truck is priced and the cheapest option per carrier is
+kept, sorted by price.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 from app.llm.base import LLMProvider
 from app.llm.mock import estimate_eta_days
 from app.pricing import price_quote
+from app.retrieval import route_distance
 from app.schemas import CarrierOption
 from app.state import DispatchState
 
@@ -17,9 +20,14 @@ def pricing_node(state: DispatchState, provider: LLMProvider) -> dict:
     request = state.get("request") or {}
     rows = state.get("rows") or []
 
+    distance = route_distance(request.get("origin"), request.get("destination"))
+    if distance is None:
+        step = {"step": "pricing", "status": "no_route",
+                "detail": {"reason": "route not in routes table"}}
+        return {"priced": True, "options": [], "route_missing": True, "trace": [step]}
+
     options: list[dict] = []
     for row in rows:
-        distance = float(row["distance_km"])
         quote = price_quote(
             distance_km=distance,
             rate_per_km=float(row["rate_per_km"]),
@@ -40,7 +48,7 @@ def pricing_node(state: DispatchState, provider: LLMProvider) -> dict:
             capacity_t=float(row["capacity_t"]),
             current_city=row["current_city"],
             rating=float(row["rating"]),
-            distance_km=distance,
+            distance_km=float(distance),
             eta_days=estimate_eta_days(distance),
             price=quote.total,
             currency=quote.currency,
@@ -59,6 +67,8 @@ def pricing_node(state: DispatchState, provider: LLMProvider) -> dict:
     step = {
         "step": "pricing",
         "status": "ok",
-        "detail": {"candidates": len(options), "options": len(deduped)},
+        "detail": {"candidates": len(options), "options": len(deduped),
+                   "distance_km": distance},
     }
-    return {"priced": True, "options": deduped, "trace": [step]}
+    return {"priced": True, "options": deduped, "route_missing": False,
+            "trace": [step]}

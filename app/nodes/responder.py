@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from app.guardrails.output_guard import check_reply
 from app.llm.base import LLMProvider
-from app.reply_templates import grounded_reply, no_options_reply
+from app.reply_templates import grounded_reply, no_options_reply, no_route_reply
 from app.state import DispatchState
 
 
@@ -19,6 +19,12 @@ def responder_node(state: DispatchState, provider: LLMProvider) -> dict:
     request = state.get("request") or {}
     options = state.get("options") or []
     top = options[:3]
+
+    if state.get("route_missing"):
+        step = {"step": "responder", "status": "no_route",
+                "detail": {"offered": 0, "mode": "deterministic"}}
+        return {"reply": no_route_reply(request), "status": "no_route",
+                "trace": [step]}
 
     if not top:
         step = {"step": "responder", "status": "no_options",

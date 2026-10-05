@@ -30,11 +30,13 @@ class DispatchState(TypedDict, total=False):
     sql: str | None
     sql_done: bool
     sql_path: str | None  # llm_sql | fallback_sql | none
+    fallback_reason: str | None  # guard_rejected|zero_rows|missing_columns|...
     sql_attempts: Annotated[list[dict[str, Any]], operator.add]
     rows: list[dict[str, Any]]
 
     # pricing
     priced: bool
+    route_missing: bool
     options: list[dict[str, Any]]
 
     # output

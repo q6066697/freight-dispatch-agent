@@ -22,6 +22,14 @@ def no_options_reply(request: dict[str, Any]) -> str:
     )
 
 
+def no_route_reply(request: dict[str, Any]) -> str:
+    return (
+        f"К сожалению, направление {_route(request)} мы пока не возим — этого "
+        "маршрута нет в нашей базе. Уточните, пожалуйста, города отправления и "
+        "назначения, и я проверю, чем сможем помочь."
+    )
+
+
 def grounded_reply(request: dict[str, Any], options: list[dict[str, Any]]) -> str:
     if not options:
         return no_options_reply(request)

@@ -121,6 +121,60 @@ def test_sql_fallback_when_model_sql_always_invalid():
     assert to_response(final).status == "ok"
 
 
+def test_llm_sql_without_distance_falls_back_no_crash():
+    """Reproduces the real KeyError: model SQL that never joined routes."""
+    class NoRoutesProvider(MockProvider):
+        def generate_sql(self, request, error=None):
+            # Valid, guard-passing, returns rows — but no routes join => no distance_km.
+            return (
+                "SELECT t.plate, t.body_type, t.capacity_t, t.volume_m3, "
+                "t.current_city, c.name AS carrier, c.rating, c.payment_terms, "
+                "r.rate_per_km, r.min_price, r.currency "
+                "FROM trucks t JOIN carriers c ON c.id = t.carrier_id "
+                "JOIN rates r ON r.carrier_id = c.id AND r.body_type = t.body_type "
+                "WHERE t.status='free' AND t.body_type='тент' AND t.capacity_t>=12"
+            )
+
+    graph = build_graph(NoRoutesProvider())
+    final = graph.invoke({"text": "12 тонн из Минска в Москву, тент, безнал"})
+    assert final["sql_path"] == "fallback_sql"
+    assert final["fallback_reason"] == "missing_columns"
+    resp = to_response(final)
+    assert resp.status == "ok"
+    assert resp.options
+
+
+def test_semantic_mismatch_falls_back():
+    """Model returns wrong-body rows -> semantic filter empties -> fallback."""
+    class WrongBodyProvider(MockProvider):
+        def generate_sql(self, request, error=None):
+            return (
+                "SELECT t.id AS truck_id, t.plate, t.body_type, t.capacity_t, "
+                "t.volume_m3, t.current_city, c.id AS carrier_id, c.name AS carrier, "
+                "c.rating, c.payment_terms, r.rate_per_km, r.min_price, r.currency, "
+                "rt.distance_km FROM trucks t "
+                "JOIN carriers c ON c.id = t.carrier_id "
+                "JOIN rates r ON r.carrier_id = c.id AND r.body_type = t.body_type "
+                "JOIN routes rt ON rt.origin='Минск' AND rt.destination='Москва' "
+                "WHERE t.status='free' AND t.body_type='реф' AND t.capacity_t>=5"
+            )
+
+    graph = build_graph(WrongBodyProvider())
+    final = graph.invoke({"text": "Тент 5 тонн из Минска в Москву, безнал"})
+    assert final["sql_path"] == "fallback_sql"
+    assert final["fallback_reason"] == "semantic_mismatch"
+    resp = to_response(final)
+    assert resp.status == "ok"
+    assert all(o.body_type == "тент" for o in resp.options)
+
+
+def test_no_route_status():
+    r = dispatch("Тент 5 тонн из Витебска в Гродно, безнал")
+    assert r.status == "no_route"
+    assert not r.options
+    assert "не возим" in r.reply or "маршрут" in r.reply.lower()
+
+
 def test_normalization_recovers_inflected_cities():
     class InflectingProvider(MockProvider):
         def extract_request(self, text):

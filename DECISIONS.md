@@ -52,6 +52,18 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D21 — Deterministic body-type backfill from raw text
+**Decision:** If the extractor returns an empty `body_type`, infer it from the raw
+request text using a dispatcher-slang lexicon (`еврофура / фура / тентовка / штора →
+тент`, `рефрижератор → реф`, `изотерм → изотерм`, `борт → борт`) — the same lexicon
+the mock already uses — applied in the extractor node after normalization.
+**Why:** The real eval (qwen2.5:3b, CPU) failed `normal_02` («еврофура») and
+`normal_07` («фура») solely because the 3B model left `body_type` null → false
+`clarify` (see docs/real-model-error-analysis.md). The lexicon is general, not a patch
+for these 12 cases, and makes extraction robust to weak models. **Not yet re-validated
+on the real model**; mock eval is unchanged (mock already fills body_type, so the
+backfill is a no-op there).
+
 ## D18 — LLM-SQL result contract + semantic filter; distance is route-derived
 **Decision:** Rows returned by the model's SQL are accepted only if they satisfy a
 column/type **contract** (`app/sql_contract.py`: carrier, plate, body_type,

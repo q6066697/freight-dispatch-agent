@@ -8,6 +8,7 @@ produced them. It is applied in the extractor node, after the provider returns.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # canonical city -> lowercase stems (ё normalized to е), handling RU case inflection.
@@ -81,6 +82,27 @@ def canonical_load_type(value: Any) -> str | None:
         return "partial"
     if "full" in v or "полн" in v or "цел" in v or "отдельн" in v:
         return "full"
+    return None
+
+
+# Dispatcher-slang body-type lexicon (D21), used to backfill when the model leaves
+# body_type empty. Order matters: specific bodies before the generic tilt.
+_BODY_DETECT = [
+    ("реф", re.compile(r"рефриж|\bреф\b|\bрефы?\b|рефка|рефрижератор")),
+    ("изотерм", re.compile(r"изотерм")),
+    ("борт", re.compile(r"\bборт|бортов|открыт\w*\s+платформ")),
+    ("тент", re.compile(r"тент|еврофур|\bфур|штор|тентов")),
+]
+
+
+def detect_body_type(text: Any) -> str | None:
+    """Infer a canonical body type from free text (slang-aware), else None."""
+    if not text or not isinstance(text, str):
+        return None
+    t = _norm(text)
+    for name, pat in _BODY_DETECT:
+        if pat.search(t):
+            return name
     return None
 
 

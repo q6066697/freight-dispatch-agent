@@ -6,6 +6,7 @@ from app.normalize import (
     canonical_body_type,
     canonical_city,
     canonical_payment,
+    detect_body_type,
     normalize_request,
 )
 
@@ -46,6 +47,17 @@ def test_canonical_payment():
     assert canonical_payment("безналичный") == "noncash"
     assert canonical_payment("cash") == "cash"
     assert canonical_payment("наличные") == "cash"
+
+
+def test_detect_body_type_slang():
+    assert detect_body_type("Еврофура из Бреста в Варшаву") == "тент"
+    assert detect_body_type("Нужна фура 15 тонн") == "тент"
+    assert detect_body_type("тентовка на 5 тонн") == "тент"
+    assert detect_body_type("рефрижератор 10 т") == "реф"
+    assert detect_body_type("изотермический фургон") == "изотерм"
+    assert detect_body_type("бортовая машина") == "борт"
+    assert detect_body_type("просто какой-то груз") is None
+    assert detect_body_type(None) is None
 
 
 def test_normalize_request_end_to_end():

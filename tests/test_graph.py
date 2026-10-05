@@ -168,6 +168,23 @@ def test_semantic_mismatch_falls_back():
     assert all(o.body_type == "тент" for o in resp.options)
 
 
+def test_body_type_backfill_when_model_omits_it():
+    """Reproduces the real normal_02: model leaves body_type null on «еврофура»."""
+    class NoBodyProvider(MockProvider):
+        def extract_request(self, text):
+            return {
+                "origin": "Брест", "destination": "Варшава", "weight_t": 20.0,
+                "body_type": None, "payment": "noncash", "volume_m3": None,
+                "cargo_type": None, "date": None, "urgent": False, "load_type": None,
+            }
+
+    graph = build_graph(NoBodyProvider())
+    final = graph.invoke({"text": "Еврофура из Бреста в Варшаву, 20 тонн, безнал"})
+    resp = to_response(final)
+    assert resp.request.body_type == "тент"
+    assert resp.status != "clarify"
+
+
 def test_no_route_status():
     r = dispatch("Тент 5 тонн из Витебска в Гродно, безнал")
     assert r.status == "no_route"

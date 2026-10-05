@@ -176,15 +176,28 @@ mock had hidden, each now fixed and regression-tested:
   `no_route` status, and a crash-isolated resumable runner.
   → **[docs/case-sql-contract.md](docs/case-sql-contract.md)**
 
-Real-model metrics (fill in after a run — use `--ids-file eval/subset_cpu.txt`):
+**Real-model results** (ollama **qwen2.5:3b**, **CPU-only, no GPU**, `--ids-file
+eval/subset_cpu.txt`, **n = 12** — indicative, *not* statistically significant):
 
-| Metric | mock | ollama / qwen2.5 |
+| Metric | mock (n=46) | qwen2.5:3b (n=12) |
 |---|---|---|
-| Extraction accuracy | 100% | _TBD_ |
-| SQL path (llm / fallback) | 18 / 5 | _TBD_ |
-| Hallucination rate | 0% | _TBD_ |
-| Attack block rate | 100% | _TBD_ |
-| Error rate | 0% | _TBD_ |
+| Status accuracy | 100% | 83.3% |
+| Error rate | 0% | 0% |
+| Extraction (overall) | 100% | 96.8% (body_type 83%, rest 100%) |
+| Clarify precision / recall | 100% / 100% | 60% / 100% |
+| SQL path (llm / fallback) | 18 / 5 | **0 / 3** |
+| Attack block rate | 100% | 100% (n=4) |
+| Hallucination rate | 0% | **0%** (n=3) |
+| Price correctness | 100% | 66.7% (n=3) |
+| Latency p50 / p95 | ~30 ms / ~55 ms | ~166 s / ~1084 s |
+
+**Key takeaway:** the 3B model produced usable SQL **0 of 3** times, yet every priced
+answer was correct and **hallucination stayed 0%** — the deterministic SQL fallback
+and output grounding (S11/S10) carried it, with no crashes. The two status misses were
+both the same model error (slang «еврофура»/«фура» → empty `body_type` → a false
+`clarify`), now mitigated by a deterministic body-type backfill that the real eval has
+**not yet re-validated**. Full breakdown:
+**[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**.
 
 ---
 
@@ -275,14 +288,32 @@ tests/               pytest suite (guardrails, pricing, graph, API, eval, normal
 
 - The `mock` extractor is rule-based: great for offline CI and demos, but real slang
   coverage is the real model's job. The eval harness is the tool to measure that.
-- Distances come from a `routes` table of known city pairs; an unknown pair yields no
-  price. A real system would fall back to a routing/geo service.
-- Truck location vs. pickup city isn't used as a hard filter (any free truck can serve
-  a route). A production version would price empty-run (подача) to the origin.
+- Distances come from a `routes` table of known city pairs; an unknown pair is
+  `no_route`. A real system would fall back to a routing/geo service.
 - No persistence of conversations / multi-turn clarify loop yet — clarify ends the
   graph with a question; the client's follow-up is a new request.
 - Guardrails are strong but not a substitute for least-privilege DB credentials in
   production; the read-only connection is the backstop that matters.
+
+### Future work (domain — from the author's dispatcher experience)
+
+The model is intentionally simplified. A production dispatcher would add the things
+that actually decide a real quote:
+
+- **Empty-run / подача.** Price the deadhead from the truck's `current_city` to the
+  pickup city — a truck 600 km away is not the cheapest option even at a lower rate.
+  Needs truck-location-aware matching, not "any free truck".
+- **Load date & availability.** Check the requested pickup date against each truck's
+  free-from date; a truck busy until Friday can't take a Thursday load.
+- **Cargo dimensions, not just tonnage.** Long pipe / timber needs a specific trailer
+  length (длинномер); oversized/heavy cargo changes the vehicle class and the price.
+  Today only weight and volume are modelled.
+- **Догруз / groupage.** Combine several partial loads on one truck and split the cost
+  by share — the `load_type="partial"` field is a first step; real groupage needs
+  consolidation and multi-stop routing.
+- **Stronger model / GPU.** The real eval ran a 3B model on CPU (slang extraction was
+  the weak spot). Re-run on a 7B+/GPU model to measure the LLM-SQL path properly and
+  re-validate the body-type backfill; expand the eval set beyond 46 cases.
 
 ---
 

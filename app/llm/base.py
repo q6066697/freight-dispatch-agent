@@ -84,8 +84,9 @@ class LLMProvider(ABC):
         """Return {is_attack: bool, category: str, reason: str}."""
 
     @abstractmethod
-    def extract_request(self, text: str) -> dict:
-        """Return a dict of extracted request fields (values only)."""
+    def extract_request(self, text: str, error: str | None = None) -> dict:
+        """Return a dict of extracted request fields. `error` = prior validation error
+        to repair (optional)."""
 
     @abstractmethod
     def generate_sql(self, request: dict, error: str | None = None) -> str:
@@ -111,8 +112,15 @@ class ChatLLMProvider(LLMProvider):
             "reason": out.get("reason", ""),
         }
 
-    def extract_request(self, text: str) -> dict:
-        return parse_json_block(self._chat(EXTRACT_SYSTEM, text))
+    def extract_request(self, text: str, error: str | None = None) -> dict:
+        user = text
+        if error:
+            user = (
+                f"{text}\n\nПредыдущий ответ не прошёл валидацию: {error}. "
+                "Верни ИСПРАВЛЕННЫЙ JSON строго по схеме (числа — числом, "
+                "payment — cash или noncash, urgent — true/false)."
+            )
+        return parse_json_block(self._chat(EXTRACT_SYSTEM, user))
 
     def generate_sql(self, request: dict, error: str | None = None) -> str:
         user = f"Заявка (JSON): {json.dumps(request, ensure_ascii=False)}"

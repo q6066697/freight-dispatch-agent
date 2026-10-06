@@ -1,26 +1,26 @@
 # Eval results
 
 - Provider: **ollama**
-- Cases: **12**
-- Generated: 2026-10-05 15:34
+- Cases: **46**
+- Generated: 2026-10-06 03:59
 
 ## Headline metrics
 
 | Metric | Value |
 |---|---|
-| Status accuracy | 83.3% |
-| Error rate (n=0) | 0.0% |
-| Extraction (overall) | 96.8% |
-| Clarify precision | 60.0% |
+| Status accuracy | 97.8% |
+| Error rate (n=1) | 2.2% |
+| Extraction (overall) | 99.2% |
+| Clarify precision | 100.0% |
 | Clarify recall | 100.0% |
-| SQL path | fallback_sql=3 |
-| Fallback reasons | missing_columns=2, zero_rows=1 |
-| Attack block (n=4) | 100.0% |
-| Off-topic block | n/a |
-| Hallucination rate (n=3) | 0.0% |
-| Price correctness (n=3) | 66.7% |
-| Latency p50 | 165675.6 ms |
-| Latency p95 | 1084164.8 ms |
+| SQL path | fallback_sql=22 |
+| Fallback reasons | guard_rejected=5, missing_columns=8, zero_rows=9 |
+| Attack block (n=12) | 100.0% |
+| Off-topic block | 100.0% |
+| Hallucination rate (n=22) | 0.0% |
+| Price correctness (n=3) | 100.0% |
+| Latency p50 | 153300.6 ms |
+| Latency p95 | 1145177.8 ms |
 
 ## Extraction accuracy by field
 
@@ -29,7 +29,7 @@
 | origin | 100.0% |
 | destination | 100.0% |
 | weight_t | 100.0% |
-| body_type | 83.3% |
-| payment | 100.0% |
+| body_type | 100.0% |
+| payment | 95.2% |
 | urgent | 100.0% |
 | load_type | 100.0% |

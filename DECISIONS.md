@@ -52,6 +52,31 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D22 — Extractor never crashes on a malformed LLM response
+**Decision:** If building `ExtractedRequest` from the model's output raises
+`ValidationError`, the extractor node (a) makes **one repair call** passing the
+validation error back to the model, then (b) if it still fails, applies **deterministic
+type coercion** (numbers parsed out of strings, booleans from да/нет/yes/1, enum values
+canonicalized or dropped to None) which cannot raise, and (c) lets `missing_fields`
+route to `clarify` if critical fields ended up empty. A request is never dropped.
+**Why:** The full real eval (qwen2.5:3b) produced one `ValidationError` crash
+(`normal_17`): the model returned a field in a shape Pydantic rejected. A weak model
+will do this; the pipeline must degrade to a clarifying question, never 500.
+
+## D23 — Domain default: «фура» = тент, «еврофура» = тент (13.6 m)
+**Decision:** Treat the slang «фура» as a tilt semi-trailer (`тент`) by default, and
+«еврофура» as a standard 13.6 m tilt (`тент`). Encoded in the body-type lexicon (D21).
+**Why:** Author's dispatcher practice — in CIS freight these words mean a curtain-side
+semi unless stated otherwise. This is a domain convention, not tuning to pass eval
+cases; it reflects how clients and dispatchers actually speak.
+
+## D24 — Eval records persist extraction, reply and SQL attempts
+**Decision:** Each per-case eval record now stores the extracted request, the final
+reply, and the SQL attempts (raw query + guard verdict per attempt), not just booleans.
+**Why:** The n=46 real run could show *that* 5 queries were guard-rejected but not
+*which rule* fired, because the records didn't carry the attempt detail. Persisting it
+makes offline error analysis possible without re-running a multi-hour CPU eval.
+
 ## D21 — Deterministic body-type backfill from raw text
 **Decision:** If the extractor returns an empty `body_type`, infer it from the raw
 request text using a dispatcher-slang lexicon (`еврофура / фура / тентовка / штора →

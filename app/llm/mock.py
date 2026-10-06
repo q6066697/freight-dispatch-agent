@@ -118,7 +118,7 @@ class MockProvider(LLMProvider):
             "reason": res.reason or "",
         }
 
-    def extract_request(self, text: str) -> dict:
+    def extract_request(self, text: str, error: str | None = None) -> dict:
         norm = _norm(text)
         origin, destination = _extract_cities(text)
 

@@ -82,6 +82,14 @@ def evaluate_case(graph, case: dict) -> dict:
         rec["error"] = None
         rec["sql_path"] = final.get("sql_path")
         rec["fallback_reason"] = final.get("fallback_reason")
+        # Persist detail for offline error analysis without re-running (D24).
+        rec["extracted"] = final.get("request")
+        rec["reply"] = resp.reply
+        rec["sql_attempts"] = [
+            {"path": a.get("path"), "ok": a.get("ok"), "reason": a.get("reason"),
+             "raw": a.get("raw")}
+            for a in (final.get("sql_attempts") or [])
+        ]
 
         fields: dict[str, bool] = {}
         gold = exp.get("fields", {})
@@ -114,6 +122,9 @@ def evaluate_case(graph, case: dict) -> dict:
         rec["error"] = type(e).__name__
         rec["sql_path"] = None
         rec["fallback_reason"] = None
+        rec["extracted"] = None
+        rec["reply"] = None
+        rec["sql_attempts"] = []
         rec["fields"] = {}
         rec["responded"] = False
         rec["hallucinated"] = False

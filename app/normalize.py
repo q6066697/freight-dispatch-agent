@@ -106,6 +106,52 @@ def detect_body_type(text: Any) -> str | None:
     return None
 
 
+_NUM_RE = re.compile(r"-?\d+(?:[.,]\d+)?")
+_TRUE_WORDS = {"true", "1", "yes", "y", "да", "срочно", "urgent"}
+
+
+def _coerce_number(v: Any) -> float | None:
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = _NUM_RE.search(v)
+        return float(m.group(0).replace(",", ".")) if m else None
+    return None
+
+
+def _coerce_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in _TRUE_WORDS
+    return False
+
+
+def coerce_types(raw: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically coerce fields so ExtractedRequest can always be built.
+
+    Numbers are parsed out of strings, booleans from да/нет/yes/1, and enum fields are
+    canonicalized (invalid values become None). This never raises — it is the
+    last-resort repair in the extractor node (D22).
+    """
+    d = normalize_request(raw)
+    if "weight_t" in d:
+        d["weight_t"] = _coerce_number(d.get("weight_t"))
+    if "volume_m3" in d:
+        d["volume_m3"] = _coerce_number(d.get("volume_m3"))
+    if "urgent" in d:
+        d["urgent"] = _coerce_bool(d.get("urgent"))
+    if d.get("payment") not in ("cash", "noncash", None):
+        d["payment"] = canonical_payment(d.get("payment"))
+    if d.get("load_type") not in ("full", "partial", None):
+        d["load_type"] = canonical_load_type(d.get("load_type"))
+    return d
+
+
 def normalize_request(raw: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of the extractor output with canonicalized fields."""
     data = dict(raw or {})

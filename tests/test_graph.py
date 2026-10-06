@@ -168,6 +168,43 @@ def test_semantic_mismatch_falls_back():
     assert all(o.body_type == "тент" for o in resp.options)
 
 
+def test_extractor_never_crashes_on_invalid_types():
+    """Model returns wrong types (string weight, Russian bool) -> coerced, no crash."""
+    class BadTypesProvider(MockProvider):
+        def extract_request(self, text, error=None):
+            return {
+                "origin": "Минск", "destination": "Москва",
+                "weight_t": "10 тонн",      # string instead of number
+                "volume_m3": "пусто",       # unparseable
+                "body_type": "тент", "payment": "безнал",  # non-literal
+                "urgent": "нет",            # Russian bool
+                "load_type": "никакой",     # invalid enum
+                "cargo_type": None, "date": None,
+            }
+
+    graph = build_graph(BadTypesProvider())
+    final = graph.invoke({"text": "12 тонн из Минска в Москву, тент, безнал"})
+    resp = to_response(final)
+    assert resp.status != "error"
+    assert resp.request.weight_t == 10.0      # parsed out of "10 тонн"
+    assert resp.request.volume_m3 is None     # unparseable -> None
+    assert resp.request.payment == "noncash"  # canonicalized
+    assert resp.request.urgent is False       # "нет" -> False
+    assert resp.request.load_type is None     # invalid enum dropped
+
+
+def test_extractor_degrades_to_clarify_on_unusable_extraction():
+    """If repair+coercion can't recover critical fields, we clarify, never crash."""
+    class GarbageProvider(MockProvider):
+        def extract_request(self, text, error=None):
+            return {"weight_t": ["not", "a", "number"], "origin": 123}
+
+    graph = build_graph(GarbageProvider())
+    final = graph.invoke({"text": "что-то непонятное"})
+    resp = to_response(final)
+    assert resp.status in ("clarify", "refused")  # never "error"
+
+
 def test_body_type_backfill_when_model_omits_it():
     """Reproduces the real normal_02: model leaves body_type null on «еврофура»."""
     class NoBodyProvider(MockProvider):

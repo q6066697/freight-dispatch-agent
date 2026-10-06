@@ -3,6 +3,39 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S13 "Full real-model eval & release" done (2026-10-06)
+
+### Full real eval analysed (ollama qwen2.5:3b, CPU, n=46)
+status 97.8%, error 2.2% (normal_17), extraction 99.2% (payment 95.2%), clarify P/R
+100/100, SQL path llm/fallback 0/22 (guard_rejected=5, missing_columns=8,
+zero_rows=9), attack 100%, offtopic 100%, hallucination 0% (n=22), price 100% (n=3),
+p50 ~153s / p95 ~1145s. The S12 slang backfill is confirmed on the real model
+(normal_02/07 now ok, body_type 100%).
+
+### Findings & fixes
+- **normal_17 = ValidationError crash** → system robustness bug. Fix D22: extractor
+  catches ValidationError → one repair call (error fed back) → deterministic type
+  coercion (numbers/bools/enums) → empty request/clarify. Never crashes. Tests added.
+- **payment 95.2% (normal_09)** = model error (left «безнал» unextracted); payment is
+  non-critical so the request still completed ok. No change (per "fix only bugs/labels").
+- **guard_rejected=5** (normal_03, normal_07, normal_10, no_route_02, no_route_04):
+  every model SQL attempt rejected by the guard. The per-attempt rule strings were NOT
+  persisted in that run — only the aggregate. Fixed forward: D24 enriches records with
+  raw SQL + guard verdict + extraction + reply.
+- **LLM-SQL accepted 0/22** — on 3B the text-to-SQL is non-functional; deterministic
+  fallback carried all retrieval → 0% hallucination, 100% price correctness, 0 crashes.
+- D23: «фура»/«еврофура» → тент domain default documented.
+
+### Verification
+- pytest 133 passed, ruff clean. mock eval (46) still all-green.
+- Publication safety (re-confirmed in S12): .env never tracked, no secrets in history.
+
+### Release
+- All S13 commits on master; pushed to origin/master (see final summary for the
+  outcome / manual command if auth was required).
+
+---
+
 ## Status: S12 "Real-model results & release prep" done (2026-10-05)
 
 ### Real eval analysed (ollama qwen2.5:3b, CPU, n=12 subset)

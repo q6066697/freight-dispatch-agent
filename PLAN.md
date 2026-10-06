@@ -33,3 +33,7 @@ All stages complete. After each: `pytest` + `ruff check .`, update `PROGRESS.md`
   (docs/real-model-error-analysis.md); deterministic body-type backfill (D21);
   README real-metrics table + domain Future work; publication safety checks
   (no secrets in tree/history, .env never tracked). 131 tests green. Ready to push.
+- [x] **S13. Full real-model eval & release.** Analysed the full n=46 run; fixed the
+  `normal_17` ValidationError crash (extractor repair → coerce → clarify, D22);
+  enriched eval records (D24); фура/еврофура domain note (D23); README n=46 table +
+  honest limitations. 133 tests green. Pushed to origin/master.

@@ -164,8 +164,8 @@ The two modes measure different things, and it matters:
   harness, so the same numbers become a genuine measure of model quality —
   extraction accuracy, SQL validity, and especially **hallucination rate**.
 
-This distinction is not academic — testing on a real local model surfaced two bugs the
-mock had hidden, each now fixed and regression-tested:
+This distinction is not academic — testing on real local models surfaced three bugs
+the mock had hidden, each now fixed and regression-tested:
 
 - A 7B model **invented two non-existent carriers and prices** on a no-options request.
   Fix: deterministic no-options reply + an output guard checking every carrier/price
@@ -175,29 +175,42 @@ mock had hidden, each now fixed and regression-tested:
   Fix: an LLM-SQL result contract + semantic filter, route-derived distance, a
   `no_route` status, and a crash-isolated resumable runner.
   → **[docs/case-sql-contract.md](docs/case-sql-contract.md)**
+- A 3B model returned a field in a **shape Pydantic rejected** → `ValidationError` that
+  dropped the request. Fix: the extractor repairs → coerces → clarifies, never crashes.
+  → **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**
 
-**Real-model results** (ollama **qwen2.5:3b**, **CPU-only, no GPU**, `--ids-file
-eval/subset_cpu.txt`, **n = 12** — indicative, *not* statistically significant):
+**Real-model results** (ollama **qwen2.5:3b**, **CPU-only, no GPU**, full dataset
+**n = 46** — indicative, *not* statistically significant):
 
-| Metric | mock (n=46) | qwen2.5:3b (n=12) |
+| Metric | mock (n=46) | qwen2.5:3b (n=46) |
 |---|---|---|
-| Status accuracy | 100% | 83.3% |
-| Error rate | 0% | 0% |
-| Extraction (overall) | 100% | 96.8% (body_type 83%, rest 100%) |
-| Clarify precision / recall | 100% / 100% | 60% / 100% |
-| SQL path (llm / fallback) | 18 / 5 | **0 / 3** |
-| Attack block rate | 100% | 100% (n=4) |
-| Hallucination rate | 0% | **0%** (n=3) |
-| Price correctness | 100% | 66.7% (n=3) |
-| Latency p50 / p95 | ~30 ms / ~55 ms | ~166 s / ~1084 s |
+| Status accuracy | 100% | 97.8% |
+| Error rate | 0% | 2.2% (1 — now fixed) |
+| Extraction (overall) | 100% | 99.2% (payment 95%, rest 100%) |
+| Clarify precision / recall | 100% / 100% | 100% / 100% |
+| SQL path (llm / fallback) | 18 / 5 | **0 / 22** |
+| Attack block rate | 100% | 100% (n=12) |
+| Hallucination rate | 0% | **0%** (n=22) |
+| Price correctness | 100% | 100% (n=3) |
+| Latency p50 / p95 | ~30 ms / ~55 ms | ~153 s / ~1145 s |
 
-**Key takeaway:** the 3B model produced usable SQL **0 of 3** times, yet every priced
-answer was correct and **hallucination stayed 0%** — the deterministic SQL fallback
-and output grounding (S11/S10) carried it, with no crashes. The two status misses were
-both the same model error (slang «еврофура»/«фура» → empty `body_type` → a false
-`clarify`), now mitigated by a deterministic body-type backfill that the real eval has
-**not yet re-validated**. Full breakdown:
-**[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**.
+How this went: a first n=12 subset exposed a slang-extraction bug (the 3B model left
+`body_type` empty on «еврофура»/«фура» → false `clarify`); a deterministic body-type
+backfill fixed it, and the **full n=46 run confirmed the fix** (both cases now `ok`,
+`body_type` 100%).
+
+**Key takeaways:**
+- The model's text-to-SQL was **accepted 0 of 22** times; the deterministic fallback
+  produced the correct candidates every time → **price correctness 100%, hallucination
+  0%**, no crashes. On a 3B model the LLM-SQL path is effectively non-functional and
+  the deterministic layers carry retrieval.
+- The SQL guard **rejected the model's own SQL on 5 cases** (`guard_rejected`) — the
+  same AST rules that stop attacks also catch a weak model's malformed queries
+  (prose/markdown around the SQL, stacked statements, non-schema tables).
+- The one crash (`normal_17`, a `ValidationError`) is fixed: the extractor now repairs
+  → coerces → clarifies instead of raising.
+
+Full breakdown: **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**.
 
 ---
 
@@ -286,6 +299,14 @@ tests/               pytest suite (guardrails, pricing, graph, API, eval, normal
 
 ## Limitations & next steps
 
+- **Price correctness is measured against only 3 pinned reference quotes.** It checks
+  that pricing is applied correctly, not that the whole dataset is priced right — a
+  small, honest sample.
+- **LLM text-to-SQL did not work at 3B** (0/22 queries accepted on the real run);
+  retrieval relied entirely on the deterministic fallback. Measuring the LLM-SQL path
+  needs a larger model / GPU (see Future work). The design treats LLM-SQL as a
+  best-effort optimization over a guaranteed deterministic query, so this is a
+  measurement gap, not a functional one.
 - The `mock` extractor is rule-based: great for offline CI and demos, but real slang
   coverage is the real model's job. The eval harness is the tool to measure that.
 - Distances come from a `routes` table of known city pairs; an unknown pair is

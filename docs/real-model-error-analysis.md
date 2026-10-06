@@ -1,104 +1,125 @@
 # Real-model error analysis (ollama qwen2.5:3b, CPU-only)
 
-Run: `python -m eval.run_eval --provider ollama --ids-file eval/subset_cpu.txt`
-Records: `eval/runs/ollama_20261005_142445.jsonl` · Summary: `eval/results_ollama.md`
-n = 12 (5 normal/slang, 3 incomplete, 4 attacks). CPU-only, no GPU. These numbers are
-indicative, **not statistically significant**.
+Model: **qwen2.5:3b** via Ollama, **CPU-only, no GPU**. Numbers are indicative,
+**not statistically significant**.
 
-## Headline
+- Full run, n = 46: `python -m eval.run_eval --provider ollama`
+  → `eval/runs/ollama_20261005_221405.jsonl`, `eval/results_ollama.md`
+- Earlier subset, n = 12: `eval/runs/ollama_20261005_142445.jsonl`
+
+## History: n=12 → fix → n=46
+
+The first subset run (n=12) failed `normal_02` («еврофура») and `normal_07` («фура»)
+with a false `clarify` because the 3B model left `body_type` empty on dispatcher
+slang. S12 added a deterministic body-type backfill (D21/D23). **The full n=46 run
+confirms the fix**: both `normal_02` and `normal_07` are now `ok`, and `body_type`
+extraction is 100%.
+
+## Headline (n=46)
 
 | Metric | Value |
 |---|---|
-| Status accuracy | 83.3% (10/12) |
-| Error rate | 0.0% |
-| Extraction (overall) | 96.8% (body_type 83.3%, every other field 100%) |
-| Clarify precision / recall | 60.0% / 100.0% |
-| SQL path | llm_sql = 0, fallback_sql = 3 (missing_columns = 2, zero_rows = 1) |
-| Attack block (n=4) | 100.0% |
-| Hallucination (n=3) | 0.0% |
-| Price correctness (n=3) | 66.7% (2/3) |
-| Latency p50 / p95 | ~166 s / ~1084 s |
+| Status accuracy | 97.8% (45/46) |
+| Error rate | 2.2% (1/46 — `normal_17`) |
+| Extraction (overall) | 99.2% (payment 95.2%, every other field 100%) |
+| Clarify precision / recall | 100% / 100% |
+| SQL path | **llm_sql = 0, fallback_sql = 22** |
+| Fallback reasons | guard_rejected = 5, missing_columns = 8, zero_rows = 9 |
+| Attack block (n=12) | 100% |
+| Off-topic block (n=3) | 100% |
+| Hallucination (n=22) | **0%** |
+| Price correctness (n=3) | 100% |
+| Latency p50 / p95 | ~153 s / ~1145 s |
 
-Two cases failed, both the **same root cause**.
+Only two cases were not perfect: one crash (`normal_17`) and one payment extraction
+miss (`normal_09`).
 
-## Case-by-case
+## normal_17 — ValidationError (the one error)
 
-| id | expected | got | verdict |
-|---|---|---|---|
-| normal_01 | ok | ok, price ✓ | pass (SQL via fallback: zero_rows) |
-| normal_02 | ok | **clarify** | fail — model error |
-| normal_04 | ok | ok, price ✓ | pass (SQL via fallback: missing_columns) |
-| normal_07 | ok | **clarify** | fail — model error (price miss is a consequence) |
-| normal_15 | ok | ok | pass (SQL via fallback: missing_columns) |
-| incomplete_01/03/05 | clarify | clarify | pass |
-| attack_01/05/09/10 | refused | refused | pass |
+`"Питер - Москва, 10 тонн тент, безнал"` → `status=error, error=ValidationError`,
+latency 152 s. The model returned the structured request in a shape Pydantic rejected
+(e.g. a numeric field as a non-numeric string, or `urgent` as a Russian word rather
+than a boolean). The exact raw payload was **not persisted** in this run's record
+(the schema stored only per-field booleans); that gap is now closed — records persist
+the raw extraction, reply and SQL attempts going forward (D24).
 
-### normal_02 — "Еврофура из Бреста в Варшаву, 20 тонн, безнал" → false clarify
-Per-field record: `origin ✓, destination ✓, weight_t ✓, payment ✓, body_type ✗`.
-The model left `body_type` empty — it did not map the dispatcher slang **«еврофура»**
-to `тент`. `body_type` is a critical field, so the graph correctly asked a
-clarifying question. The *routing was correct given the extraction*; the extraction
-was wrong.
-**Classification: model error** (slang not understood). Not a labeling error, not a
-pipeline bug.
+**Classification: system robustness bug.** The model misbehaving is expected; the
+pipeline raising and dropping the request is the defect. **Fix (D22):** the extractor
+now catches `ValidationError`, makes one repair call (feeding the error back to the
+model), then applies deterministic type coercion (numbers parsed from strings,
+booleans from да/нет/1, enums canonicalized or dropped to None), and finally falls
+back to an empty request → a clarifying question. It can no longer crash. Regression
+tests: `test_extractor_never_crashes_on_invalid_types`,
+`test_extractor_degrades_to_clarify_on_unusable_extraction`.
 
-### normal_07 — "Нужна фура 15 тонн Минск — Москва, безнал, срочно завтра" → false clarify
-Record: `origin ✓, destination ✓, weight_t ✓, payment ✓, urgent ✓`; `body_type` not
-in the gold set (the word is **«фура»**, conventionally a tilt semi-trailer = `тент`).
-The model again produced no `body_type`, so the request looked incomplete → clarify.
-Because it never reached pricing, `price_ok` is false.
-**Classification: model error.** The wrong price is a *downstream consequence* of the
-same missing `body_type`, **not** a pricing bug and **not** a bad reference price
-(the reference 46 500 ₽ is what the deterministic pricer produces once `тент` is
-known).
+## payment 95.2% — normal_09
 
-### body_type 83.3%
-The single miss is normal_02 (5/6 scored cases correct). normal_07's `body_type` is
-not in its gold set, so it is not counted in this figure even though it is the same
-underlying problem.
+`"Реф 5 тонн Минск-Гродно безнал"` → `payment` scored false (the one miss). The gold
+is `noncash` and «безнал» is unambiguous, so the reference is correct and the pipeline
+behaved correctly given the extraction — the model simply failed to populate (or
+mis-populated) `payment`.
 
-### SQL path: llm_sql = 0 / 3
-The 3B model produced **no** usable SQL on any priced case: two queries were missing
-required columns (it did not join `routes`), one returned zero rows. The deterministic
-**fallback carried all three** priced results, which is exactly why hallucination is
-0% and error rate is 0% — the S11 contract + fallback did their job. On this model the
-LLM-SQL path is effectively decorative; retrieval correctness comes from the fallback.
+**Classification: model error.** Not a labeling error, not a pipeline bug.
+`payment` is **not** a critical field, so the request still completed as `ok`; the
+only effect is the field-accuracy number. Per the S13 rules (fix only system bugs and
+clear labeling errors) **nothing was changed** for this — adding a deterministic
+payment backfill would be a reasonable future robustness step but is out of scope here.
 
-### Latency
-p50 ≈ 166 s, p95 ≈ 1084 s. CPU-only inference dominates; the slowest cases are the ok
-ones that make all five LLM calls. Not a correctness signal.
+## SQL: llm_sql = 0 / 22 — the headline for a 3B model
 
-## What was changed as a result
+On **none** of the 22 cases that reached the SQL agent did qwen2.5:3b produce a query
+whose rows were usable. The breakdown (fallback reasons):
 
-No labeling errors and no pipeline bugs were found, so per the S12 rules nothing was
-"fixed to pass these 12 cases". One **deterministic enhancement** was added: when the
-extractor leaves `body_type` empty, a body-type is inferred from the raw text using
-the same dispatcher-slang lexicon the mock uses (`еврофура / фура / тентовка → тент`,
-`рефрижератор → реф`, …). This is a general lexicon, not a patch for these cases, and
-it would turn both false clarifies into correct `ok` answers. **It has not yet been
-re-validated on the real model** (the real eval is slow and run by hand); mock eval
-stays 100%.
+- `zero_rows = 9` — a valid query that returned nothing (wrong filters / lane).
+- `missing_columns = 8` — the query passed the guard but lacked required columns
+  (typically it didn't join `routes`, so no `distance_km`).
+- `guard_rejected = 5` — **every** model SQL attempt for the case was rejected by the
+  SQL guard.
+
+In all 22 the deterministic fallback produced the correct candidate set, which is why
+**hallucination is 0% and price correctness is 100%** — the model's text-to-SQL was
+effectively non-functional at this size, and the S11 contract + fallback carried the
+whole retrieval path.
+
+### Which guard rules fired (honest note)
+
+The 5 `guard_rejected` cases are `normal_03, normal_07, normal_10, no_route_02,
+no_route_04`. **The specific guard rule per attempt was not stored in this run's
+records** (only the aggregate `fallback_reason`), so it cannot be read back from that
+jsonl — I will not guess specific strings. Record enrichment (D24) now persists each
+attempt's raw SQL and guard verdict, so the next run will show the exact rule. The
+guard rejects a query for any of: not exactly one statement (stacked `;`), not a
+`SELECT`, a table outside the whitelist, SQL comments (`--`, `/* */`), a forbidden
+keyword/DDL/DML, a dangerous function, or a parse error. For a 3B model the realistic
+causes are prose/markdown fences around the SQL (parse error), a trailing `;` plus an
+explanation (multiple statements), and referencing tables that aren't in the schema —
+exactly the shapes the guard exists to stop.
 
 ## Conclusions
 
-- The expensive, variable part (LLM) failed in the two ways we hardened against in
-  S10–S11 — weak extraction and unusable SQL — and in **every** case the deterministic
-  layers (clarify, SQL contract + fallback, grounding) produced a safe result: no
-  crash, no hallucination, no wrong price that reached a client.
-- The one real quality gap is **slang extraction on a 3B model**; the deterministic
-  body-type backfill addresses it without touching prompts or data.
-- Next: re-run the subset after the backfill, and run on a stronger model / GPU.
+- The deterministic layers did their job end to end: 0 hallucinations, 0 wrong prices
+  reaching a client, and after S13 no crashes — a 3B model on CPU degrades to
+  fallbacks and clarifications, never to a bad or fabricated answer.
+- The LLM's own text-to-SQL is unusable at 3B (0/22). Correct retrieval came entirely
+  from the deterministic fallback. A larger model / GPU is needed to exercise the
+  LLM-SQL path at all (Future work).
+- Remaining quality gaps are small and model-side (one `payment` miss); the one
+  pipeline defect (the ValidationError crash) is fixed and regression-tested.
 
 ---
 
 ## Кратко по-русски
 
-Реальный прогон qwen2.5:3b (CPU) дал 83.3% по статусу. Оба провала — normal_02
-(«еврофура») и normal_07 («фура») — одна причина: модель не извлекла `body_type` из
-сленга, получился ложный `clarify` (а неверная цена в normal_07 — следствие того же,
-а не ошибка расчёта или эталона). Это **ошибки модели**, не баги системы и не ошибки
-разметки. LLM-SQL не сработал ни разу (0/3) — все три расчёта вытянул детерминированный
-fallback, поэтому галлюцинаций 0% и падений 0% (сработали фиксы S10–S11). Добавлено
-одно детерминированное улучшение: если экстрактор не дал `body_type`, он достаётся из
-текста по словарю сленга («еврофура/фура/тентовка → тент»). На реальной модели это ещё
-не перепроверялось; mock-eval остаётся 100%.
+Полный прогон qwen2.5:3b (CPU, n=46): status 97.8%, extraction 99.2%, hallucination
+0%, price 100%. Подтвердилось исправление сленга из S12 — normal_02/normal_07 теперь
+`ok`, body_type 100%. Единственное падение — normal_17 (`ValidationError`): модель
+вернула поле в формате, который отверг Pydantic; это **баг устойчивости системы**,
+исправлен (D22): extractor ловит ошибку, делает одну повторную попытку с текстом
+ошибки, затем детерминированно приводит типы и в крайнем случае уходит в `clarify` —
+заявка больше не падает. Ошибка payment (normal_09) — **ошибка модели**, поле
+некритичное, заявка всё равно `ok`, ничего не меняем. Главный факт: LLM-SQL принят
+**0 из 22** (guard_rejected=5, missing_columns=8, zero_rows=9) — на 3B text-to-SQL
+фактически не работает, но детерминированный fallback дал 100% корректных подборов и
+0% галлюцинаций. Конкретные правила guard по 5 кейсам в том прогоне не сохранялись
+(только агрегат); теперь записи хранят raw SQL и вердикт (D24), так что следующий
+прогон покажет правило точно.

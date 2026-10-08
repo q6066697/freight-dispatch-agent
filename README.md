@@ -164,53 +164,67 @@ The two modes measure different things, and it matters:
   harness, so the same numbers become a genuine measure of model quality —
   extraction accuracy, SQL validity, and especially **hallucination rate**.
 
-This distinction is not academic — testing on real local models surfaced three bugs
-the mock had hidden, each now fixed and regression-tested:
+This distinction is not academic — testing on real local models surfaced four bugs
+the mock had hidden. Each is fixed, regression-tested, **and verified on the real
+model** in a subsequent full run:
 
-- A 7B model **invented two non-existent carriers and prices** on a no-options request.
-  Fix: deterministic no-options reply + an output guard checking every carrier/price
-  against `state.options`. → **[docs/case-hallucination.md](docs/case-hallucination.md)**
-- A 3B model produced a **guard-safe but wrong** query (no `routes` join → crash;
-  elsewhere it confused payment with currency) → `KeyError` that killed the whole run.
-  Fix: an LLM-SQL result contract + semantic filter, route-derived distance, a
-  `no_route` status, and a crash-isolated resumable runner.
-  → **[docs/case-sql-contract.md](docs/case-sql-contract.md)**
-- A 3B model returned a field in a **shape Pydantic rejected** → `ValidationError` that
-  dropped the request. Fix: the extractor repairs → coerces → clarifies, never crashes.
-  → **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**
+- A 7B model **invented carriers and prices** on a no-options request → output guard +
+  deterministic no-options reply. *Verified on real model.*
+  → **[docs/case-hallucination.md](docs/case-hallucination.md)**
+- A 3B model produced a **guard-safe but wrong** query → `KeyError` crash → LLM-SQL
+  result contract + semantic filter + route-derived distance + `no_route`.
+  *Verified on real model.* → **[docs/case-sql-contract.md](docs/case-sql-contract.md)**
+- A 3B model left `body_type` empty on **slang** («еврофура»/«фура») → false `clarify`
+  → deterministic body-type backfill. *Verified on real model (n=12 found → n=46
+  confirmed).*
+- A 3B model returned a field in a **shape Pydantic rejected** → `ValidationError`
+  crash → extractor repairs → coerces → clarifies. *Verified on real model (`normal_17`
+  went from crash to `ok`).* → **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**
 
 **Real-model results** (ollama **qwen2.5:3b**, **CPU-only, no GPU**, full dataset
-**n = 46** — indicative, *not* statistically significant):
+**n = 46**, second run — indicative, *not* statistically significant; this run even
+**survived a machine shutdown and continued with `--resume`**):
 
 | Metric | mock (n=46) | qwen2.5:3b (n=46) |
 |---|---|---|
-| Status accuracy | 100% | 97.8% |
-| Error rate | 0% | 2.2% (1 — now fixed) |
+| Status accuracy | 100% | **100%** |
+| Error rate | 0% | **0%** |
 | Extraction (overall) | 100% | 99.2% (payment 95%, rest 100%) |
 | Clarify precision / recall | 100% / 100% | 100% / 100% |
-| SQL path (llm / fallback) | 18 / 5 | **0 / 22** |
+| SQL path (llm / fallback) | 18 / 5 | **0 / 23** |
 | Attack block rate | 100% | 100% (n=12) |
-| Hallucination rate | 0% | **0%** (n=22) |
+| Hallucination rate | 0% | **0%** (n=23) |
 | Price correctness | 100% | 100% (n=3) |
-| Latency p50 / p95 | ~30 ms / ~55 ms | ~153 s / ~1145 s |
-
-How this went: a first n=12 subset exposed a slang-extraction bug (the 3B model left
-`body_type` empty on «еврофура»/«фура» → false `clarify`); a deterministic body-type
-backfill fixed it, and the **full n=46 run confirmed the fix** (both cases now `ok`,
-`body_type` 100%).
+| Latency p50 / p95 | ~30 ms / ~55 ms | ~174 s / ~1202 s |
 
 **Key takeaways:**
-- The model's text-to-SQL was **accepted 0 of 22** times; the deterministic fallback
-  produced the correct candidates every time → **price correctness 100%, hallucination
-  0%**, no crashes. On a 3B model the LLM-SQL path is effectively non-functional and
-  the deterministic layers carry retrieval.
-- The SQL guard **rejected the model's own SQL on 5 cases** (`guard_rejected`) — the
-  same AST rules that stop attacks also catch a weak model's malformed queries
-  (prose/markdown around the SQL, stacked statements, non-schema tables).
-- The one crash (`normal_17`, a `ValidationError`) is fixed: the extractor now repairs
-  → coerces → clarifies instead of raising.
+- The model's text-to-SQL was **accepted 0 of 23** times; the deterministic fallback
+  produced the correct candidates every time → **status 100%, price 100%,
+  hallucination 0%**, no crashes. On a 3B model the LLM-SQL path is effectively
+  non-functional and the deterministic layers carry retrieval entirely.
+- The SQL guard **rejected the model's own SQL on 5 cases** — the same AST rules that
+  stop attacks also catch a weak model's malformed queries.
+- Two full runs back to back are stable (identical fallback-reason distribution, SQL
+  accepted 0 times in both); the only delta is `normal_17` going from crash to `ok`.
 
-Full breakdown: **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**.
+### What the model's own SQL looked like
+
+Real queries qwen2.5:3b produced, caught before they could touch pricing:
+
+```sql
+-- payment confused with currency → zero rows (currency is 'RUB', not 'noncash')
+JOIN rates r ON t.body_type = r.body_type AND r.currency = 'noncash'
+
+-- a hallucinated PostGIS function over city-name text → rejected by the guard
+... AND ST_Distance_Sphere(MakePoint(-27.6, 38.4), MakePoint(c.home_city, c.phone)) ...
+
+-- a join on a column that doesn't exist (rates has no truck_id) → unusable rows
+JOIN rates r ON t.id = r.truck_id
+```
+
+Full taxonomy (8 failure modes, per-case breakdown, more examples):
+**[docs/text-to-sql-failure-analysis.md](docs/text-to-sql-failure-analysis.md)**.
+Broader analysis: **[docs/real-model-error-analysis.md](docs/real-model-error-analysis.md)**.
 
 ---
 
@@ -291,7 +305,8 @@ app/
   guardrails/        sql_guard.py, input_guard.py, output_guard.py
 db/                  schema.sql + seed.py (synthetic data)
 eval/                dataset.jsonl, run_eval.py, results_<provider>.md, subset_cpu.txt, runs/
-docs/                case-hallucination.md, case-sql-contract.md
+docs/                case-hallucination.md, case-sql-contract.md,
+                     real-model-error-analysis.md, text-to-sql-failure-analysis.md
 tests/               pytest suite (guardrails, pricing, graph, API, eval, normalize, sql_contract)
 ```
 
@@ -332,9 +347,13 @@ that actually decide a real quote:
 - **Догруз / groupage.** Combine several partial loads on one truck and split the cost
   by share — the `load_type="partial"` field is a first step; real groupage needs
   consolidation and multi-stop routing.
-- **Stronger model / GPU.** The real eval ran a 3B model on CPU (slang extraction was
-  the weak spot). Re-run on a 7B+/GPU model to measure the LLM-SQL path properly and
+- **Stronger model / GPU.** The real eval ran a 3B model on CPU (its text-to-SQL was
+  accepted 0/23). Re-run on a 7B+/GPU model to measure the LLM-SQL path properly and
   re-validate the body-type backfill; expand the eval set beyond 46 cases.
+- **Split `fallback_reason` into `guard_rejected` vs `exec_error`.** Today a
+  guard-passing query that fails at execution (e.g. a non-existent column) is bucketed
+  as `guard_rejected`; separating the two would sharpen the SQL diagnostics (see
+  docs/text-to-sql-failure-analysis.md).
 
 ---
 

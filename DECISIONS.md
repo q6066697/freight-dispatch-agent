@@ -52,6 +52,19 @@ trivial, while real providers are a config flip away.
 **Why:** Observability is a nice-to-have; it must never be a hard dependency or
 break offline runs.
 
+## D25 — S14 is analysis/docs only; `fallback_reason` imprecision deferred
+**Decision:** S14 changes no system logic — only analysis and documentation of the
+second full real run. One imprecision was found and is **documented, not fixed**:
+`fallback_reason="guard_rejected"` is set whenever no model query produced usable
+executed rows, which conflates two distinct causes — (a) the SQL guard rejected every
+attempt (parse errors, markdown fences, multiple statements), and (b) a guard-passing
+query failed at *execution* (e.g. referencing a non-existent column like
+`rates.truck_id`, an unbound named parameter, or `WHERE` before `JOIN`). Splitting it
+into `guard_rejected` vs `exec_error` is listed in Future work.
+**Why:** The stage brief is explicit: analyse, do not change logic; surface any bug in
+Future work. The conflation is cosmetic (behaviour — fall back deterministically — is
+correct) so it is not worth a logic change here.
+
 ## D22 — Extractor never crashes on a malformed LLM response
 **Decision:** If building `ExtractedRequest` from the model's output raises
 `ValidationError`, the extractor node (a) makes **one repair call** passing the

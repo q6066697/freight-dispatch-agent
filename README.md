@@ -285,6 +285,41 @@ docker compose up --build
 
 ---
 
+## Example run
+
+A **real** `--verbose` run on **qwen2.5:3b via Ollama, CPU-only** (taken verbatim from
+`eval/runs/ollama_20261006_221545.jsonl`), showing the LLM-SQL being rejected and the
+deterministic fallback taking over:
+
+```text
+$ python -m app.cli --verbose "нужно отвезти 12 тонн труб из минска в москву в четверг, тент, оплата безнал"
+
+extracted (normalized):
+{ "origin": "Минск", "destination": "Москва", "cargo_type": "трубы",
+  "weight_t": 12.0, "body_type": "тент", "date": "четверг",
+  "payment": "noncash", "urgent": false, "load_type": "full", "missing_fields": [] }
+
+sql_agent:
+  [llm] attempt 1: OK (guard) — but 0 rows → rejected (fallback_reason=zero_rows)
+      JOIN rates r ON t.body_type = r.body_type AND r.currency = 'noncash'   -- currency is 'RUB', not payment
+      WHERE ... t.body_type LIKE '%трубы%' ...                               -- body_type filtered by cargo word
+  [fallback] parameterized query → 20 rows
+  sql_path = fallback_sql
+
+reply to client:
+  Вот предложенные варианты перевозок для вашего груза:
+  1. ООО «ГомельАвтоТранс» — тент — 37200.0 ₽ — доставка в течение 2 дней
+  2. ИП Мороз Д.И.          — тент — 43000.0 ₽ — доставка в течение 2 дней
+  3. ООО «БелТрансЛогистик» — тент — 44200.0 ₽ — доставка в течение 2 дней
+```
+
+The model's SQL confused `currency` with payment and filtered body type by the cargo
+word, so it returned nothing; the deterministic fallback produced the real candidates
+and prices. On CPU this single request took ~17 min — see
+[docs/text-to-sql-failure-analysis.md](docs/text-to-sql-failure-analysis.md).
+
+---
+
 ## Project layout
 
 ```

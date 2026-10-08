@@ -3,6 +3,34 @@
 Running log. After each stage: what's done, what's next. Lets work resume if
 context is lost — read CLAUDE.md + PLAN.md + this file.
 
+## Status: S14 "SQL failure analysis & final README" done (2026-10-08)
+
+### Second full real run analysed (ollama qwen2.5:3b, CPU, n=46; survived shutdown + --resume)
+`eval/runs/ollama_20261006_221545.jsonl` (records now carry raw SQL + guard verdict +
+extraction, D24). status 100%, error 0% (normal_17 fixed → D22 confirmed on real
+model), extraction 99.2% (payment 95.5%), clarify P/R 100/100, SQL path llm/fallback
+0/23 (guard_rejected=5, missing_columns=9, zero_rows=9), attack 100%, hallucination 0%
+(n=23), price 100% (n=3), p50 ~174s / p95 ~1202s.
+
+### SQL failure taxonomy (docs/text-to-sql-failure-analysis.md)
+LLM-SQL accepted 0/23. Failure modes: payment↔currency confusion (r.currency='noncash');
+wrong output shape (aliased/omitted columns → missing_columns); non-existent join keys
+(rates.truck_id, r.min_rating → exec fail); hallucinated PostGIS (ST_Distance_Sphere,
+MakePoint → parse reject); markdown fences; malformed syntax; LIKE on cargo word;
+omitted routes join. The deterministic fallback carried all 23 → 100% correct, 0
+hallucination. Finding: `fallback_reason="guard_rejected"` conflates guard-reject with
+exec-failure → Future work (D25, not fixed this stage).
+
+### Two runs compared (221405 vs 221545)
+Stable: SQL accepted 0 in both, hallucination 0 in both, identical guard_rejected(5)
+and zero_rows(9); only delta is normal_17 crash→ok (missing_columns 8→9). Confirms D22.
+
+### Verification
+- pytest 133 passed, ruff clean. No system logic changed (analysis/docs only).
+- All S14 commits pushed to origin/master.
+
+---
+
 ## Status: S13 "Full real-model eval & release" done (2026-10-06)
 
 ### Full real eval analysed (ollama qwen2.5:3b, CPU, n=46)

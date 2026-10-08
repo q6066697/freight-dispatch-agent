@@ -37,3 +37,8 @@ All stages complete. After each: `pytest` + `ruff check .`, update `PROGRESS.md`
   `normal_17` ValidationError crash (extractor repair → coerce → clarify, D22);
   enriched eval records (D24); фура/еврофура domain note (D23); README n=46 table +
   honest limitations. 133 tests green. Pushed to origin/master.
+- [x] **S14. SQL failure analysis & final README.** Taxonomised qwen2.5:3b's SQL
+  errors from the 2nd full run (0/23 accepted; docs/text-to-sql-failure-analysis.md);
+  two-run comparison (stable, normal_17 crash→ok confirms D22); README second-run
+  metrics (100%) + model-SQL examples + --resume note. Analysis/docs only (D25).
+  133 tests green. Pushed to origin/master.
